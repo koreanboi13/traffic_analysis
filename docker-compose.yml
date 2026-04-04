@@ -5,8 +5,6 @@ services:
       POSTGRES_DB: teststand
       POSTGRES_USER: teststand
       POSTGRES_PASSWORD: teststand
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U teststand"]
       interval: 2s
@@ -14,11 +12,32 @@ services:
 
   teststand-app:
     build: ./teststand
-    ports:
-      - "8888:8888"
     depends_on:
       teststand-db:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://teststand:teststand@teststand-db:5432/teststand?sslmode=disable
       PORT: "8888"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    environment:
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "8123:8123"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8123/ping"]
+      interval: 2s
+      retries: 10
+
+  waf:
+    build: ./waf
+    ports:
+      - "8081:8080"
+    depends_on:
+      teststand-app:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
+    environment:
+      WAF_CONFIG_PATH: /app/config.yaml
