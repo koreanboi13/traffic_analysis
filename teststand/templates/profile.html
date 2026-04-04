@@ -1,0 +1,15 @@
+{{define "content"}}
+<h1>Профиль пользователя <span class="tag-vuln">XSS Reflected</span></h1>
+<div class="card">
+  {{if .Name}}
+  <p style="font-size:16px;">Профиль: <strong>{{.Name}}</strong></p>
+  {{else}}
+  <p style="color:#888;">Имя не указано. Передайте параметр <code>?name=</code>.</p>
+  {{end}}
+</div>
+<div class="card" style="font-size:13px;color:#666;">
+  <strong>Подсказки для тестирования XSS:</strong><br>
+  <a href="/profile?name=&lt;script&gt;alert(1)&lt;/script&gt;">/profile?name=&lt;script&gt;alert(1)&lt;/script&gt;</a><br>
+  <a href="/profile?name=&lt;img src=x onerror=alert('xss')&gt;">/profile?name=&lt;img src=x onerror=alert('xss')&gt;</a>
+</div>
+{{end}}

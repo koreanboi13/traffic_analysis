@@ -1,0 +1,24 @@
+{{define "content"}}
+<h1>Вход в систему <span class="tag-vuln">SQLi</span></h1>
+<div class="card">
+  {{if .Message}}
+    {{if eq .Message "Неверные учётные данные"}}
+    <div class="msg-err">{{.Message}}</div>
+    {{else}}
+    <div class="msg-ok">{{.Message}}</div>
+    {{end}}
+  {{end}}
+  <form method="POST" action="/login">
+    <label for="username">Имя пользователя</label>
+    <input type="text" id="username" name="username" placeholder="admin">
+    <label for="password">Пароль</label>
+    <input type="password" id="password" name="password" placeholder="••••••••">
+    <button type="submit">Войти</button>
+  </form>
+</div>
+<div class="card" style="font-size:13px;color:#666;">
+  <strong>Подсказки для тестирования SQLi:</strong><br>
+  Логин: <code>' OR '1'='1</code> — пароль: что угодно<br>
+  Логин: <code>admin'--</code> — пароль: что угодно
+</div>
+{{end}}

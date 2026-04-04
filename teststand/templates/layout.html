@@ -1,0 +1,58 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Тестовый стенд WAF</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #333; }
+    nav {
+      background: #2c3e50; padding: 0 24px;
+      display: flex; align-items: center; gap: 8px; height: 52px;
+    }
+    nav a {
+      color: #ecf0f1; text-decoration: none; padding: 8px 14px;
+      border-radius: 4px; font-size: 14px;
+    }
+    nav a:hover { background: #34495e; }
+    nav .brand { font-weight: bold; font-size: 16px; margin-right: 16px; color: #fff; }
+    .container { max-width: 900px; margin: 32px auto; padding: 0 16px; }
+    h1 { font-size: 22px; margin-bottom: 20px; color: #2c3e50; }
+    h2 { font-size: 18px; margin-bottom: 14px; color: #2c3e50; }
+    .card {
+      background: #fff; border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.12); padding: 24px; margin-bottom: 20px;
+    }
+    form label { display: block; margin-bottom: 4px; font-size: 13px; color: #555; }
+    form input[type=text], form input[type=password], form textarea {
+      width: 100%; padding: 8px 10px; border: 1px solid #ccd; border-radius: 4px;
+      font-size: 14px; margin-bottom: 12px;
+    }
+    form button {
+      background: #2980b9; color: #fff; border: none; padding: 9px 20px;
+      border-radius: 4px; cursor: pointer; font-size: 14px;
+    }
+    form button:hover { background: #2471a3; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid #eee; }
+    th { background: #f0f3f6; font-weight: 600; }
+    .msg-ok  { background: #d4efdf; color: #1e8449; padding: 10px 14px; border-radius: 4px; margin-bottom: 14px; }
+    .msg-err { background: #fadbd8; color: #c0392b; padding: 10px 14px; border-radius: 4px; margin-bottom: 14px; font-family: monospace; font-size: 13px; }
+    .tag-vuln { display: inline-block; background: #e74c3c; color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 3px; margin-left: 6px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="brand">WAF Стенд</span>
+    <a href="/">Главная</a>
+    <a href="/search">Поиск</a>
+    <a href="/login">Вход</a>
+    <a href="/profile">Профиль</a>
+    <a href="/guestbook">Гостевая книга</a>
+  </nav>
+  <div class="container">
+    {{template "content" .}}
+  </div>
+</body>
+</html>{{end}}

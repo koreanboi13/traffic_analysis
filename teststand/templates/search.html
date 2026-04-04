@@ -1,0 +1,37 @@
+{{define "content"}}
+<h1>Поиск товаров <span class="tag-vuln">SQLi</span></h1>
+<div class="card">
+  <form method="GET" action="/search">
+    <label for="q">Поисковый запрос</label>
+    <input type="text" id="q" name="q" value="{{.Query}}" placeholder="Например: Ноутбук">
+    <button type="submit">Найти</button>
+  </form>
+</div>
+{{if .Err}}
+<div class="msg-err">Ошибка БД: {{.Err}}</div>
+{{end}}
+{{if .Query}}
+<div class="card">
+  <h2>Результаты для: «{{.Query}}»</h2>
+  {{if .Results}}
+  <table>
+    <thead>
+      <tr><th>#</th><th>Название</th><th>Описание</th><th>Цена, ₽</th></tr>
+    </thead>
+    <tbody>
+      {{range .Results}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td>{{.Name}}</td>
+        <td>{{.Description}}</td>
+        <td>{{printf "%.2f" .Price}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else if not .Err}}
+  <p style="color:#888;">Ничего не найдено.</p>
+  {{end}}
+</div>
+{{end}}
+{{end}}

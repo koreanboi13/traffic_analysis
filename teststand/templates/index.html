@@ -1,0 +1,36 @@
+{{define "content"}}
+<h1>Тестовый стенд — уязвимое веб-приложение</h1>
+<div class="card">
+  <p style="margin-bottom:16px;color:#555;font-size:14px;">
+    Это учебное приложение с <strong>намеренно внедрёнными уязвимостями</strong> для тестирования WAF.
+    Не разворачивайте его в открытом доступе.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Страница</th><th>Уязвимость</th><th>Описание</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><a href="/search">/search</a></td>
+        <td><span class="tag-vuln">SQLi</span></td>
+        <td>Поиск товаров — параметр <code>q</code> подставляется напрямую в SQL-запрос</td>
+      </tr>
+      <tr>
+        <td><a href="/login">/login</a></td>
+        <td><span class="tag-vuln">SQLi</span></td>
+        <td>Авторизация — логин и пароль конкатенируются в запрос без параметризации</td>
+      </tr>
+      <tr>
+        <td><a href="/profile">/profile</a></td>
+        <td><span class="tag-vuln">XSS Reflected</span></td>
+        <td>Параметр <code>name</code> вставляется в HTML без экранирования</td>
+      </tr>
+      <tr>
+        <td><a href="/guestbook">/guestbook</a></td>
+        <td><span class="tag-vuln">XSS Stored</span></td>
+        <td>Сообщения сохраняются и отображаются без санитизации</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+{{end}}

@@ -1,0 +1,24 @@
+services:
+  teststand-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: teststand
+      POSTGRES_USER: teststand
+      POSTGRES_PASSWORD: teststand
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teststand"]
+      interval: 2s
+      retries: 10
+
+  teststand-app:
+    build: ./teststand
+    ports:
+      - "8888:8888"
+    depends_on:
+      teststand-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://teststand:teststand@teststand-db:5432/teststand?sslmode=disable
+      PORT: "8888"

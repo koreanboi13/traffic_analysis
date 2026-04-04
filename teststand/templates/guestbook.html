@@ -1,0 +1,32 @@
+{{define "content"}}
+<h1>Гостевая книга <span class="tag-vuln">XSS Stored</span></h1>
+<div class="card">
+  <h2>Оставить запись</h2>
+  <form method="POST" action="/guestbook">
+    <label for="author">Автор</label>
+    <input type="text" id="author" name="author" placeholder="Ваше имя" required>
+    <label for="message">Сообщение</label>
+    <textarea id="message" name="message" rows="3" placeholder="Введите сообщение..." required></textarea>
+    <button type="submit">Отправить</button>
+  </form>
+</div>
+{{if .Entries}}
+<div class="card">
+  <h2>Записи</h2>
+  <table>
+    <thead>
+      <tr><th>Автор</th><th>Сообщение</th><th>Дата</th></tr>
+    </thead>
+    <tbody>
+      {{range .Entries}}
+      <tr>
+        <td>{{.Author}}</td>
+        <td>{{.Message}}</td>
+        <td style="white-space:nowrap;font-size:12px;color:#888;">{{.CreatedAt.Format "02.01.2006 15:04"}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+{{end}}
