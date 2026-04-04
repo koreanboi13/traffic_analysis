@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -10,6 +11,7 @@ import (
 // Config holds all WAF configuration sections.
 type Config struct {
 	Proxy      ProxyConfig      `mapstructure:"proxy"`
+	Analysis   AnalysisConfig   `mapstructure:"analysis"`
 	ClickHouse ClickHouseConfig `mapstructure:"clickhouse"`
 	Logging    LoggingConfig    `mapstructure:"logging"`
 }
@@ -20,10 +22,18 @@ type ProxyConfig struct {
 	BackendURL string `mapstructure:"backend_url"`
 }
 
+// AnalysisConfig holds request analysis settings.
+type AnalysisConfig struct {
+	MaxBodySize     int `mapstructure:"max_body_size"`
+	MaxDecodePasses int `mapstructure:"max_decode_passes"`
+}
+
 // ClickHouseConfig holds ClickHouse connection settings.
 type ClickHouseConfig struct {
-	Addr     string `mapstructure:"addr"`
-	Database string `mapstructure:"database"`
+	Addr          string        `mapstructure:"addr"`
+	Database      string        `mapstructure:"database"`
+	BatchSize     int           `mapstructure:"batch_size"`
+	FlushInterval time.Duration `mapstructure:"flush_interval"`
 }
 
 // LoggingConfig holds logging settings.

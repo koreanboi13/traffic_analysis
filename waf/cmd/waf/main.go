@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/koreanboi13/traffic_analysis/waf/config"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/engine"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/events"
@@ -38,7 +40,7 @@ func main() {
 		logger.Fatal("failed to connect to clickhouse", zap.Error(err))
 	}
 	defer storage.Close()
-	_ = storage // will be used by middleware in later plans
+	_ = storage // will be used by event writer in later plans
 
 	// 5. Create reverse proxy.
 	proxy, err := engine.NewProxy(cfg.Proxy.BackendURL, logger)
@@ -46,10 +48,20 @@ func main() {
 		logger.Fatal("failed to create proxy", zap.Error(err))
 	}
 
-	// 6. Setup HTTP routes.
-	mux := http.NewServeMux()
-	mux.Handle("/healthz", engine.HealthHandler())
-	mux.Handle("/", proxy)
+	// 6. Setup chi router.
+	r := chi.NewRouter()
+	r.Use(chimw.RequestID)
+
+	// healthz before WAF middleware — no analysis on healthchecks.
+	r.Get("/healthz", engine.HealthHandler())
+
+	// WAF middleware group — Parse, Normalize, RecordEvent will be added here.
+	r.Group(func(r chi.Router) {
+		// r.Use(wafmw.Parse(cfg.Analysis.MaxBodySize))
+		// r.Use(wafmw.Normalize(cfg.Analysis.MaxDecodePasses))
+		// r.Use(wafmw.RecordEvent(writer))
+		r.Handle("/*", proxy)
+	})
 
 	// 7. Start HTTP server.
 	logger.Info("waf proxy ready",
@@ -57,7 +69,7 @@ func main() {
 		zap.String("backend", cfg.Proxy.BackendURL),
 	)
 
-	if err := http.ListenAndServe(cfg.Proxy.ListenAddr, mux); err != nil {
+	if err := http.ListenAndServe(cfg.Proxy.ListenAddr, r); err != nil {
 		logger.Fatal("http server failed", zap.Error(err))
 	}
 }

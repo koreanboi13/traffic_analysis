@@ -2,9 +2,15 @@ proxy:
   listen_addr: ":8080"
   backend_url: "http://teststand-app:8888"
 
+analysis:
+  max_body_size: 1048576
+  max_decode_passes: 3
+
 clickhouse:
   addr: "clickhouse:9000"
   database: "waf"
+  batch_size: 100
+  flush_interval: "1s"
 
 logging:
   level: "info"
