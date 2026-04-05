@@ -5,36 +5,37 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	events2 "github.com/koreanboi13/traffic_analysis/waf/internal/events/clickhouse"
 	"go.uber.org/zap"
 )
 
 // Storage определяет интерфейс для записи событий в ClickHouse
 type Storage interface {
-	InsertBatch(ctx context.Context, events []Event) error
+	InsertBatch(ctx context.Context, events []events2.Event) error
 }
 
 // Writer выполняет пакетную запись событий в ClickHouse
 type Writer struct {
-	storage      Storage
-	batchSize    int
+	storage       Storage
+	batchSize     int
 	flushInterval time.Duration
-	logger       *zap.Logger
-	
-	eventCh      chan Event
-	doneCh       chan struct{}
+	logger        *zap.Logger
+
+	eventCh chan events2.Event
+	doneCh  chan struct{}
 }
 
 // NewWriter создаёт новый Writer
 func NewWriter(storage Storage, batchSize int, flushInterval time.Duration, logger *zap.Logger) *Writer {
 	// Буферизованный канал с запасом: batchSize * 10
 	bufferSize := batchSize * 10
-	
+
 	return &Writer{
 		storage:       storage,
 		batchSize:     batchSize,
 		flushInterval: flushInterval,
 		logger:        logger,
-		eventCh:       make(chan Event, bufferSize),
+		eventCh:       make(chan events2.Event, bufferSize),
 		doneCh:        make(chan struct{}),
 	}
 }
@@ -45,17 +46,17 @@ func (w *Writer) Start(ctx context.Context) {
 }
 
 // Send отправляет событие в канал (неблокирующая операция)
-func (w *Writer) Send(event Event) {
+func (w *Writer) Send(event events2.Event) {
 	// Устанавливаем timestamp, если он не задан
 	if event.Timestamp == 0 {
 		event.Timestamp = time.Now().UnixMilli()
 	}
-	
+
 	// Генерируем UUID, если он не задан
 	if event.EventID == uuid.Nil {
 		event.EventID = uuid.New()
 	}
-	
+
 	select {
 	case w.eventCh <- event:
 		// Событие успешно отправлено в канал
@@ -80,19 +81,19 @@ func (w *Writer) Stop() {
 // run основной цикл обработки событий
 func (w *Writer) run(ctx context.Context) {
 	defer close(w.doneCh)
-	
+
 	// Локальный буфер для накопления событий
-	buffer := make([]Event, 0, w.batchSize)
-	
+	buffer := make([]events2.Event, 0, w.batchSize)
+
 	// Таймер для периодического flush
 	ticker := time.NewTicker(w.flushInterval)
 	defer ticker.Stop()
-	
+
 	w.logger.Info("event writer started",
 		zap.Int("batch_size", w.batchSize),
 		zap.Duration("flush_interval", w.flushInterval),
 	)
-	
+
 	for {
 		select {
 		case event, ok := <-w.eventCh:
@@ -104,39 +105,39 @@ func (w *Writer) run(ctx context.Context) {
 				w.logger.Info("event channel closed, writer shutting down")
 				return
 			}
-			
+
 			// Добавляем событие в буфер
 			buffer = append(buffer, event)
-			
+
 			// Если буфер достиг batch_size - делаем flush
 			if len(buffer) >= w.batchSize {
 				w.flushWithTimeout(buffer)
 				// Создаём новый буфер
-				buffer = make([]Event, 0, w.batchSize)
+				buffer = make([]events2.Event, 0, w.batchSize)
 			}
-			
+
 		case <-ticker.C:
 			// По таймеру: если в буфере есть события - делаем flush
 			if len(buffer) > 0 {
 				w.flushWithTimeout(buffer)
 				// Создаём новый буфер
-				buffer = make([]Event, 0, w.batchSize)
+				buffer = make([]events2.Event, 0, w.batchSize)
 			}
-			
+
 		case <-ctx.Done():
 			// Контекст отменён - завершаем работу
 			w.logger.Info("context cancelled, flushing remaining events and shutting down")
-			
+
 			// Читаем все оставшиеся события из канала
 			for event := range w.eventCh {
 				buffer = append(buffer, event)
 			}
-			
+
 			// Flush оставшихся событий
 			if len(buffer) > 0 {
 				w.flushWithTimeout(buffer)
 			}
-			
+
 			w.logger.Info("writer shutdown completed")
 			return
 		}
@@ -144,15 +145,15 @@ func (w *Writer) run(ctx context.Context) {
 }
 
 // flushWithTimeout выполняет flush с таймаутом 10 секунд
-func (w *Writer) flushWithTimeout(events []Event) {
+func (w *Writer) flushWithTimeout(events []events2.Event) {
 	if len(events) == 0 {
 		return
 	}
-	
+
 	// Создаём контекст с таймаутом 10 секунд
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	// Пытаемся записать пачку событий
 	err := w.storage.InsertBatch(ctx, events)
 	if err != nil {
@@ -161,7 +162,7 @@ func (w *Writer) flushWithTimeout(events []Event) {
 			zap.Error(err),
 			zap.Int("batch_size", len(events)),
 		)
-		
+
 		// Дополнительно логируем первое событие для диагностики
 		if len(events) > 0 {
 			w.logger.Debug("first event in failed batch",
@@ -173,7 +174,7 @@ func (w *Writer) flushWithTimeout(events []Event) {
 		}
 		return
 	}
-	
+
 	w.logger.Debug("successfully flushed events batch",
 		zap.Int("batch_size", len(events)),
 	)
