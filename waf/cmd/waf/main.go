@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -9,7 +10,9 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/koreanboi13/traffic_analysis/waf/config"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/engine"
-	events "github.com/koreanboi13/traffic_analysis/waf/internal/events/clickhouse"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/events"
+	eventsch "github.com/koreanboi13/traffic_analysis/waf/internal/events/clickhouse"
+	wafmw "github.com/koreanboi13/traffic_analysis/waf/internal/middleware"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -35,12 +38,17 @@ func main() {
 	defer logger.Sync()
 
 	// 4. Connect to ClickHouse.
-	storage, err := events.NewStorage(cfg.ClickHouse.Addr, cfg.ClickHouse.Database, logger)
+	storage, err := eventsch.NewStorage(cfg.ClickHouse.Addr, cfg.ClickHouse.Database, logger)
 	if err != nil {
 		logger.Fatal("failed to connect to clickhouse", zap.Error(err))
 	}
 	defer storage.Close()
-	_ = storage // will be used by event writer in later plans
+
+	writer := events.NewWriter(storage, cfg.ClickHouse.BatchSize, cfg.ClickHouse.FlushInterval, logger)
+	writerCtx, cancelWriter := context.WithCancel(context.Background())
+	defer cancelWriter()
+	writer.Start(writerCtx)
+	defer writer.Stop()
 
 	// 5. Create reverse proxy.
 	proxy, err := engine.NewProxy(cfg.Proxy.BackendURL, logger)
@@ -57,9 +65,12 @@ func main() {
 
 	// WAF middleware group — Parse, Normalize, RecordEvent will be added here.
 	r.Group(func(r chi.Router) {
-		// r.Use(wafmw.Parse(cfg.Analysis.MaxBodySize))
-		// r.Use(wafmw.Normalize(cfg.Analysis.MaxDecodePasses))
-		// r.Use(wafmw.RecordEvent(writer))
+		r.Use(wafmw.Parse(cfg.Analysis.MaxBodySize))
+		r.Use(wafmw.Normalize(cfg.Analysis.MaxDecodePasses, logger))
+
+		recordEvent := wafmw.NewRecordEvent(writer, logger)
+		r.Use(recordEvent.Handler)
+
 		r.Handle("/*", proxy)
 	})
 

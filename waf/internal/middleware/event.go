@@ -131,6 +131,7 @@ func (m *RecordEvent) buildEvent(parsedReq *ParsedRequest, statusCode int, laten
 	event.Host = parsedReq.Host
 	event.Method = parsedReq.Method
 	event.Path = parsedReq.Path
+	event.NormalizedPath = parsedReq.NormalizedPath
 	event.Verdict = "allow" // Пока всегда allow, позже будет меняться detect middleware
 	event.StatusCode = uint16(statusCode)
 	event.LatencyMs = latencyMs

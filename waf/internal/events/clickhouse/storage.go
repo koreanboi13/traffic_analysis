@@ -100,6 +100,7 @@ func (s *Storage) migrateNewColumns(ctx context.Context, database string) error 
 		typ      string
 		modifier string // DEFAULT, etc.
 	}{
+		{"normalized_path", "String", ""},
 		{"raw_query", "String", ""},
 		{"normalized_query", "String", ""},
 		{"raw_body", "String", ""},
@@ -154,13 +155,13 @@ func (s *Storage) InsertBatch(ctx context.Context, events []Event) error {
 	batch, err := s.conn.PrepareBatch(ctx, fmt.Sprintf(`
 		INSERT INTO %s.waf_events (
 			event_id, timestamp, request_id, client_ip, host, method, path,
-			verdict, status_code, latency_ms,
+			normalized_path, verdict, status_code, latency_ms,
 			raw_query, normalized_query, raw_body, normalized_body,
 			query_params, body_params, headers, user_agent, content_type,
 			referer, cookies, body_truncated, body_size, rule_ids, score
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?,
+			?, ?, ?, ?,
 			?, ?, ?, ?,
 			?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?
@@ -187,6 +188,7 @@ func (s *Storage) InsertBatch(ctx context.Context, events []Event) error {
 			event.Host,
 			event.Method,
 			event.Path,
+			event.NormalizedPath,
 			event.Verdict, // String -> Enum8('allow','block','log_only')
 			event.StatusCode,
 			event.LatencyMs,

@@ -14,6 +14,7 @@ type Event struct {
 	Host       string    `json:"host" db:"host"`               // Хост
 	Method     string    `json:"method" db:"method"`           // HTTP метод
 	Path       string    `json:"path" db:"path"`               // Путь запроса
+	NormalizedPath string `json:"normalized_path,omitempty" db:"normalized_path"` // Нормализованный путь
 	Verdict    string    `json:"verdict" db:"verdict"`         // Вердикт: "allow", "block" или "log_only"
 	StatusCode uint16    `json:"status_code" db:"status_code"` // HTTP код ответа
 	LatencyMs  float32   `json:"latency_ms" db:"latency_ms"`   // Задержка в миллисекундах
