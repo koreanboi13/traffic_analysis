@@ -9,7 +9,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/koreanboi13/traffic_analysis/waf/config"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/engine"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/events"
+	events "github.com/koreanboi13/traffic_analysis/waf/internal/events/clickhouse"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
