@@ -1,16 +1,14 @@
 package middleware
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"time"
 
-	"github.com/google/uuid"
+	ch "github.com/koreanboi13/traffic_analysis/waf/internal/events/clickhouse"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/events"
 	"go.uber.org/zap"
-
-	"waf/internal/events"
 )
 
 // responseWriter обёртка над http.ResponseWriter для перехвата HTTP статус кода
@@ -52,36 +50,6 @@ func (rw *responseWriter) StatusCode() int {
 	return rw.statusCode
 }
 
-// ParsedRequest содержит все данные, собранные из запроса после парсинга и нормализации
-type ParsedRequest struct {
-	RequestID        string
-	ClientIP         string
-	Host             string
-	Method           string
-	Path             string
-	RawQuery         string
-	NormalizedQuery  string
-	RawBody          string
-	NormalizedBody   string
-	QueryParams      map[string]interface{}
-	BodyParams       map[string]interface{}
-	Headers          map[string]string
-	Cookies          map[string]string
-	UserAgent        string
-	ContentType      string
-	Referer          string
-	BodyTruncated    bool
-	BodySize         uint32
-}
-
-// contextKey тип для ключей контекста
-type contextKey string
-
-const (
-	// ParsedRequestKey ключ для хранения ParsedRequest в контексте
-	ParsedRequestKey contextKey = "parsed_request"
-)
-
 // RecordEvent middleware для записи событий в ClickHouse
 type RecordEvent struct {
 	writer *events.Writer
@@ -106,7 +74,7 @@ func (m *RecordEvent) Handler(next http.Handler) http.Handler {
 		rw := newResponseWriter(w)
 
 		// Получаем ParsedRequest из контекста
-		parsedReq := getParsedRequestFromContext(r.Context())
+		parsedReq := GetParsedRequest(r.Context())
 		if parsedReq == nil {
 			m.logger.Warn("parsed request not found in context, skipping event recording",
 				zap.String("path", r.URL.Path),
@@ -141,7 +109,7 @@ func (m *RecordEvent) Handler(next http.Handler) http.Handler {
 }
 
 // buildEvent создаёт Event из ParsedRequest
-func (m *RecordEvent) buildEvent(parsedReq *ParsedRequest, statusCode int, latencyMs float32) events.Event {
+func (m *RecordEvent) buildEvent(parsedReq *ParsedRequest, statusCode int, latencyMs float32) ch.Event {
 	// Сериализуем map-поля в JSON строки
 	queryParamsJSON := serializeToJSON(parsedReq.QueryParams, m.logger)
 	bodyParamsJSON := serializeToJSON(parsedReq.BodyParams, m.logger)
@@ -155,7 +123,7 @@ func (m *RecordEvent) buildEvent(parsedReq *ParsedRequest, statusCode int, laten
 	}
 
 	// Создаём событие
-	event := events.NewEvent()
+	event := ch.Event{}
 	
 	// Заполняем базовые поля
 	event.RequestID = parsedReq.RequestID
@@ -170,7 +138,7 @@ func (m *RecordEvent) buildEvent(parsedReq *ParsedRequest, statusCode int, laten
 	// Заполняем расширенные поля
 	event.RawQuery = parsedReq.RawQuery
 	event.NormalizedQuery = parsedReq.NormalizedQuery
-	event.RawBody = parsedReq.RawBody
+	event.RawBody = string(parsedReq.RawBody)
 	event.NormalizedBody = parsedReq.NormalizedBody
 	event.QueryParams = queryParamsJSON
 	event.BodyParams = bodyParamsJSON
@@ -180,7 +148,9 @@ func (m *RecordEvent) buildEvent(parsedReq *ParsedRequest, statusCode int, laten
 	event.ContentType = parsedReq.ContentType
 	event.Referer = parsedReq.Referer
 	event.BodyTruncated = bodyTruncated
-	event.BodySize = parsedReq.BodySize
+	if parsedReq.BodySize > 0 {
+		event.BodySize = uint32(parsedReq.BodySize)
+	}
 
 	// Заполняем плейсхолдеры для Phase 4
 	event.TriggeredRulesIDs = []string{} // Пустой массив строк
@@ -224,20 +194,5 @@ func getType(v interface{}) string {
 	if v == nil {
 		return "nil"
 	}
-	return string(v.(type).(string))
-}
-
-// getParsedRequestFromContext извлекает ParsedRequest из контекста
-func getParsedRequestFromContext(ctx context.Context) *ParsedRequest {
-	if val := ctx.Value(ParsedRequestKey); val != nil {
-		if req, ok := val.(*ParsedRequest); ok {
-			return req
-		}
-	}
-	return nil
-}
-
-// SetParsedRequestToContext сохраняет ParsedRequest в контекст
-func SetParsedRequestToContext(ctx context.Context, req *ParsedRequest) context.Context {
-	return context.WithValue(ctx, ParsedRequestKey, req)
+	return reflect.TypeOf(v).String()
 }
