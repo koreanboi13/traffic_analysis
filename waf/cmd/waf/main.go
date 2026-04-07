@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -218,15 +219,17 @@ func main() {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := proxyServer.Shutdown(shutCtx); err != nil {
-		logger.Error("proxy shutdown error", zap.Error(err))
+	var wg sync.WaitGroup
+	for _, srv := range []*http.Server{proxyServer, adminServer, metricsSrv} {
+		wg.Add(1)
+		go func(s *http.Server) {
+			defer wg.Done()
+			if err := s.Shutdown(shutCtx); err != nil {
+				logger.Error("server shutdown error", zap.String("addr", s.Addr), zap.Error(err))
+			}
+		}(srv)
 	}
-	if err := adminServer.Shutdown(shutCtx); err != nil {
-		logger.Error("admin shutdown error", zap.Error(err))
-	}
-	if err := metricsSrv.Shutdown(shutCtx); err != nil {
-		logger.Error("metrics shutdown error", zap.Error(err))
-	}
+	wg.Wait()
 
 	logger.Info("all servers stopped")
 }
