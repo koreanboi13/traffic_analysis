@@ -1,4 +1,4 @@
-package proxy
+package handler
 
 import (
 	"encoding/json"
@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/koreanboi13/traffic_analysis/waf/internal/app/proxy/wafcontext"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/domain"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/usecase/detection"
 	"github.com/stretchr/testify/assert"
@@ -36,7 +37,7 @@ func testRules() []domain.Rule {
 func executeDetect(t *testing.T, detect *Detect, pr *domain.ParsedRequest) (*httptest.ResponseRecorder, bool) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	req = req.WithContext(WithParsedRequest(req.Context(), pr))
+	req = req.WithContext(wafcontext.WithParsedRequest(req.Context(), pr))
 	rec := httptest.NewRecorder()
 
 	nextCalled := false

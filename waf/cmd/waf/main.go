@@ -10,17 +10,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/koreanboi13/traffic_analysis/waf/config"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/adapter/clickhouse"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/adapter/postgres"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/adapter/rulesfile"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/app/admin"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/app/metrics"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/app/proxy"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/eventwriter"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/transport/api"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/transport/metrics"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/transport/proxy"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/usecase/admin"
+	useadmin "github.com/koreanboi13/traffic_analysis/waf/internal/usecase/admin"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/usecase/detection"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -149,45 +147,30 @@ func main() {
 	// 12. Create Prometheus metrics.
 	m := metrics.NewMetrics()
 
-	// 13. Setup chi router for proxy server.
-	r := chi.NewRouter()
-	r.Use(chimw.RequestID)
+	// 13. Build proxy router with WAF pipeline.
+	proxyRouter := proxy.NewRouter(proxy.RouterConfig{
+		MaxBodySize:      cfg.Analysis.MaxBodySize,
+		MaxDecodePasses:  cfg.Analysis.MaxDecodePasses,
+		DetectionEnabled: cfg.Detection.Enabled,
+	}, reverseProxy, ruleEngine, allowlist, ew, m, logger)
 
-	// Healthz: before WAF middleware — no analysis on health checks.
-	r.Get("/healthz", proxy.HealthHandler())
-
-	// WAF middleware group: Metrics -> Parse -> Normalize -> RecordEvent -> Detect -> Proxy
-	r.Group(func(r chi.Router) {
-		r.Use(metrics.Instrument(m))
-		r.Use(proxy.Parse(cfg.Analysis.MaxBodySize))
-		r.Use(proxy.Normalize(cfg.Analysis.MaxDecodePasses))
-
-		recordEvent := proxy.NewRecordEvent(ew, logger)
-		r.Use(recordEvent.Handler)
-
-		detect := proxy.NewDetect(ruleEngine, allowlist, cfg.Detection.Enabled, logger)
-		r.Use(detect.Handler)
-
-		r.Handle("/*", reverseProxy)
-	})
-
-	// 14. Create admin API server.
+	// 14. Build admin API router.
 	jwtSecret := []byte(cfg.Auth.JWTSecret)
-	ruleService := admin.NewRuleService(ruleRepo, ruleEngine)
-	authService := admin.NewAuthService(userRepo, jwtSecret, cfg.Auth.TokenTTL)
-	eventService := admin.NewEventService(chStorage)
+	ruleService := useadmin.NewRuleService(ruleRepo, ruleEngine)
+	authService := useadmin.NewAuthService(userRepo, jwtSecret, cfg.Auth.TokenTTL)
+	eventService := useadmin.NewEventService(chStorage)
 
-	adminSrv := api.NewServer(ruleService, authService, eventService, jwtSecret, nil, logger)
+	adminRouter := admin.NewRouter(ruleService, authService, eventService, jwtSecret, nil, logger)
 
 	// 15. Create metrics HTTP server.
-	metricsSrv := metrics.NewMetricsServer(cfg.Metrics.ListenAddr, m)
+	metricsSrv := metrics.NewServer(cfg.Metrics.ListenAddr, m)
 
 	// 16. Start three servers with graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	proxyServer := &http.Server{Addr: cfg.Proxy.ListenAddr, Handler: r}
-	adminServer := &http.Server{Addr: cfg.AdminAPI.ListenAddr, Handler: adminSrv.Router}
+	proxyServer := &http.Server{Addr: cfg.Proxy.ListenAddr, Handler: proxyRouter}
+	adminServer := &http.Server{Addr: cfg.AdminAPI.ListenAddr, Handler: adminRouter}
 
 	go func() {
 		logger.Info("proxy listening", zap.String("addr", cfg.Proxy.ListenAddr))
