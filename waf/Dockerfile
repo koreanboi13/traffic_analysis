@@ -14,6 +14,7 @@ WORKDIR /app
 
 COPY --from=builder /app/waf .
 COPY --from=builder /app/config.yaml .
+COPY --from=builder /app/rules.yaml .
 
 EXPOSE 8080
 
