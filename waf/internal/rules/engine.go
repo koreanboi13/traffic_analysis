@@ -5,7 +5,6 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/koreanboi13/traffic_analysis/waf/config"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/middleware"
 )
 
 // RuleEngine evaluates detection rules against parsed requests.
@@ -24,10 +23,13 @@ func NewRuleEngine(rules []Rule, cfg config.DetectionConfig) (*RuleEngine, error
 	return &RuleEngine{rules: rules, regexCache: cache, cfg: cfg}, nil
 }
 
-// Evaluate runs all enabled rules against the request and returns the result.
-func (e *RuleEngine) Evaluate(pr *middleware.ParsedRequest) EvaluationResult {
+// Evaluate runs all enabled rules against zone data and returns the result.
+// zoneData maps zone names ("query", "path", "headers", "cookies", "body") to their values.
+func (e *RuleEngine) Evaluate(zoneData map[string][]string) EvaluationResult {
 	var matches []RuleMatch
 	var score float32
+
+	allZones := []string{"query", "path", "headers", "cookies", "body"}
 
 	for _, rule := range e.rules {
 		if !rule.Enabled {
@@ -36,11 +38,11 @@ func (e *RuleEngine) Evaluate(pr *middleware.ParsedRequest) EvaluationResult {
 
 		zones := rule.Targets
 		if len(zones) == 0 {
-			zones = []string{"query", "path", "headers", "cookies", "body"}
+			zones = allZones
 		}
 
 		for _, zone := range zones {
-			values := extractZoneValues(pr, zone)
+			values := zoneData[zone]
 			for _, val := range values {
 				if val == "" {
 					continue
@@ -66,7 +68,7 @@ func (e *RuleEngine) Evaluate(pr *middleware.ParsedRequest) EvaluationResult {
 						Value:    truncated,
 					})
 					score += rule.Weight
-					goto nextRule // one match per rule is enough
+					goto nextRule
 				}
 			}
 		}
@@ -127,44 +129,5 @@ func matchHeuristic(rule Rule, value string) bool {
 		return hasSQLiHeuristic(value)
 	default:
 		return false
-	}
-}
-
-func extractZoneValues(pr *middleware.ParsedRequest, zone string) []string {
-	switch zone {
-	case "query":
-		vals := make([]string, 0, len(pr.NormalizedParams))
-		for _, v := range pr.NormalizedParams {
-			vals = append(vals, v)
-		}
-		if pr.NormalizedQuery != "" {
-			vals = append(vals, pr.NormalizedQuery)
-		}
-		return vals
-	case "path":
-		return []string{pr.NormalizedPath}
-	case "headers":
-		vals := make([]string, 0, len(pr.Headers))
-		for _, v := range pr.Headers {
-			vals = append(vals, v)
-		}
-		return vals
-	case "cookies":
-		vals := make([]string, 0, len(pr.Cookies))
-		for _, v := range pr.Cookies {
-			vals = append(vals, v)
-		}
-		return vals
-	case "body":
-		var vals []string
-		if pr.NormalizedBody != "" {
-			vals = append(vals, pr.NormalizedBody)
-		}
-		for _, bp := range pr.NormalizedBodyParams {
-			vals = append(vals, bp.Value)
-		}
-		return vals
-	default:
-		return nil
 	}
 }

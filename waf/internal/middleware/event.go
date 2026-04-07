@@ -122,7 +122,10 @@ func (m *RecordEvent) buildEvent(parsedReq *ParsedRequest, statusCode int, laten
 	event.Method = parsedReq.Method
 	event.Path = parsedReq.Path
 	event.NormalizedPath = parsedReq.NormalizedPath
-	event.Verdict = "allow" // Пока всегда allow, позже будет меняться detect middleware
+	event.Verdict = parsedReq.Verdict
+	if event.Verdict == "" {
+		event.Verdict = "allow"
+	}
 	event.StatusCode = uint16(statusCode)
 	event.LatencyMs = latencyMs
 
@@ -143,9 +146,12 @@ func (m *RecordEvent) buildEvent(parsedReq *ParsedRequest, statusCode int, laten
 		event.BodySize = uint32(parsedReq.BodySize)
 	}
 
-	// Заполняем плейсхолдеры для Phase 4
-	event.RuleIDs = []string{} // Пустой массив строк
-	event.Score = 0.0
+	// Detection results from Detect middleware
+	event.RuleIDs = parsedReq.RuleIDs
+	if event.RuleIDs == nil {
+		event.RuleIDs = []string{}
+	}
+	event.Score = parsedReq.Score
 
 	return event
 }

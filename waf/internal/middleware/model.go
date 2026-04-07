@@ -31,6 +31,11 @@ type ParsedRequest struct {
 	NormalizedParams     map[string]string
 	NormalizedBody       string
 	NormalizedBodyParams []BodyParam
+
+	// Detection results (populated by Detect middleware)
+	Verdict string   // "allow", "log_only", "block"
+	RuleIDs []string // IDs of triggered rules
+	Score   float32  // Accumulated risk score
 }
 
 // BodyParam represents a single extracted body field.
