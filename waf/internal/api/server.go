@@ -33,7 +33,7 @@ func NewServer(cfg config.Config, db *postgres.DB, storage *chstorage.Storage, e
 
 	// CORS for React panel (panel may run on a different origin)
 	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:3000"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type"},
 		AllowCredentials: true,

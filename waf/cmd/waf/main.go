@@ -77,7 +77,9 @@ func main() {
 		if _, err := pgDB.CreateUser(seedCtx, "admin", string(hash), "admin"); err != nil {
 			logger.Error("failed to seed default admin user", zap.Error(err))
 		} else {
-			logger.Info("default admin user created", zap.String("username", "admin"), zap.String("password", "admin"))
+			logger.Info("default admin user created",
+				zap.String("username", "admin"),
+				zap.String("note", "change default password immediately"))
 		}
 	}
 
@@ -183,21 +185,24 @@ func main() {
 	go func() {
 		logger.Info("proxy listening", zap.String("addr", cfg.Proxy.ListenAddr))
 		if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("proxy server failed", zap.Error(err))
+			logger.Error("proxy server failed", zap.Error(err))
+			stop()
 		}
 	}()
 
 	go func() {
 		logger.Info("admin api listening", zap.String("addr", cfg.AdminAPI.ListenAddr))
 		if err := adminServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("admin server failed", zap.Error(err))
+			logger.Error("admin server failed", zap.Error(err))
+			stop()
 		}
 	}()
 
 	go func() {
 		logger.Info("metrics listening", zap.String("addr", cfg.Metrics.ListenAddr))
 		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("metrics server failed", zap.Error(err))
+			logger.Error("metrics server failed", zap.Error(err))
+			stop()
 		}
 	}()
 

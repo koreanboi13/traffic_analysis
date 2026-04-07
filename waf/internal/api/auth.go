@@ -17,6 +17,7 @@ import (
 // Uses bcrypt.CompareHashAndPassword for timing-safe comparison (T-05-05).
 func HandleLogin(db *postgres.DB, secret []byte, ttl time.Duration, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 		var req LoginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")

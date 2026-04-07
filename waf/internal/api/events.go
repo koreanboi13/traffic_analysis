@@ -94,6 +94,7 @@ func HandleListEvents(storage *chstorage.Storage, logger *zap.Logger) http.Handl
 // HandleExportEvents returns a handler for POST /api/events/export.
 func HandleExportEvents(storage *chstorage.Storage, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 		var body ExportFilter
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")

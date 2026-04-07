@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -10,6 +11,9 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
+
+// validDBName matches safe ClickHouse database identifiers to prevent SQL injection.
+var validDBName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // EventFilter holds query parameters for filtering events.
 type EventFilter struct {
@@ -31,6 +35,10 @@ type Storage struct {
 
 // NewStorage connects to ClickHouse via the native protocol and runs auto-migration.
 func NewStorage(addr, database string, logger *zap.Logger) (*Storage, error) {
+	if !validDBName.MatchString(database) {
+		return nil, fmt.Errorf("invalid database name: %q", database)
+	}
+
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{addr},
 		Auth: clickhouse.Auth{
@@ -372,14 +380,4 @@ func (s *Storage) Close() error {
 // Ping checks the ClickHouse connection health.
 func (s *Storage) Ping(ctx context.Context) error {
 	return s.conn.Ping(ctx)
-}
-
-// Exec executes an arbitrary SQL query (for testing/admin purposes)
-func (s *Storage) Exec(ctx context.Context, query string) error {
-	return s.conn.Exec(ctx, query)
-}
-
-// Query executes a SELECT query and returns rows (for testing/admin purposes)
-func (s *Storage) Query(ctx context.Context, query string) (driver.Rows, error) {
-	return s.conn.Query(ctx, query)
 }

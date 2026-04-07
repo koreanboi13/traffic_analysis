@@ -61,6 +61,7 @@ func HandleGetRule(db *postgres.DB, logger *zap.Logger) http.HandlerFunc {
 // POST /api/rules — returns 201 Created.
 func HandleCreateRule(db *postgres.DB, engine *rules.RuleEngine, logger *zap.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 		var req RuleRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")
@@ -111,9 +112,19 @@ func HandleUpdateRule(db *postgres.DB, engine *rules.RuleEngine, logger *zap.Log
 	return func(w http.ResponseWriter, r *http.Request) {
 		ruleID := chi.URLParam(r, "id")
 
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MB limit
 		var req RuleRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		if req.Name == "" || req.Type == "" || req.Category == "" {
+			writeError(w, http.StatusBadRequest, "name, type, and category are required")
+			return
+		}
+		if req.Weight <= 0 {
+			writeError(w, http.StatusBadRequest, "weight must be greater than 0")
 			return
 		}
 
