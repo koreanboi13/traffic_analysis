@@ -21,3 +21,8 @@ detection:
   log_threshold: 3
   block_threshold: 7
   enabled: true
+  allowlist:
+    - comment: "Health check endpoints"
+      paths: ["/healthz"]
+    - comment: "Local development"
+      ips: ["127.0.0.1", "::1"]

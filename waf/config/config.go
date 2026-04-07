@@ -19,10 +19,22 @@ type Config struct {
 
 // DetectionConfig holds detection engine settings.
 type DetectionConfig struct {
-	RulesFile      string  `mapstructure:"rules_file"`
-	LogThreshold   float32 `mapstructure:"log_threshold"`
-	BlockThreshold float32 `mapstructure:"block_threshold"`
-	Enabled        bool    `mapstructure:"enabled"`
+	RulesFile      string                 `mapstructure:"rules_file"`
+	LogThreshold   float32                `mapstructure:"log_threshold"`
+	BlockThreshold float32                `mapstructure:"block_threshold"`
+	Enabled        bool                   `mapstructure:"enabled"`
+	Allowlist      []AllowlistEntryConfig `mapstructure:"allowlist"`
+}
+
+// AllowlistEntryConfig holds a single allowlist entry from config.
+type AllowlistEntryConfig struct {
+	Comment    string            `mapstructure:"comment"`
+	IPs        []string          `mapstructure:"ips"`
+	Paths      []string          `mapstructure:"paths"`
+	Headers    map[string]string `mapstructure:"headers"`
+	UserAgents []string          `mapstructure:"user_agents"`
+	Params     map[string]string `mapstructure:"params"`
+	RuleIDs    []string          `mapstructure:"rule_ids"`
 }
 
 // ProxyConfig holds reverse proxy settings.
