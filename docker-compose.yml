@@ -30,14 +30,35 @@ services:
       interval: 2s
       retries: 10
 
+  waf-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: waf
+      POSTGRES_USER: waf
+      POSTGRES_PASSWORD: waf_secret
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U waf"]
+      interval: 2s
+      retries: 10
+
   waf:
     build: ./waf
     ports:
       - "8081:8080"
+      - "8090:8090"
+      - "9090:9090"
     depends_on:
       teststand-app:
         condition: service_started
       clickhouse:
         condition: service_healthy
+      waf-postgres:
+        condition: service_healthy
     environment:
       WAF_CONFIG_PATH: /app/config.yaml
+      WAF_POSTGRES_HOST: waf-postgres
+      WAF_POSTGRES_PORT: "5432"
+      WAF_POSTGRES_USER: waf
+      WAF_POSTGRES_PASSWORD: waf_secret
+      WAF_POSTGRES_DB: waf
+      WAF_POSTGRES_SSL_MODE: disable

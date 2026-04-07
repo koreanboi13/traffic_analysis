@@ -15,6 +15,42 @@ type Config struct {
 	ClickHouse ClickHouseConfig `mapstructure:"clickhouse"`
 	Logging    LoggingConfig    `mapstructure:"logging"`
 	Detection  DetectionConfig  `mapstructure:"detection"`
+	Auth       AuthConfig       `mapstructure:"auth"`
+	AdminAPI   AdminAPIConfig   `mapstructure:"admin_api"`
+	Metrics    MetricsConfig    `mapstructure:"metrics"`
+	Postgres   PostgresConfig   `mapstructure:"postgres"`
+}
+
+// AuthConfig holds JWT authentication settings.
+type AuthConfig struct {
+	JWTSecret string        `mapstructure:"jwt_secret"`
+	TokenTTL  time.Duration `mapstructure:"token_ttl"`
+}
+
+// AdminAPIConfig holds Admin API server settings.
+type AdminAPIConfig struct {
+	ListenAddr string `mapstructure:"listen_addr"`
+}
+
+// MetricsConfig holds Prometheus metrics server settings.
+type MetricsConfig struct {
+	ListenAddr string `mapstructure:"listen_addr"`
+}
+
+// PostgresConfig holds PostgreSQL connection settings.
+type PostgresConfig struct {
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	User     string `mapstructure:"user"`
+	Password string `mapstructure:"password"`
+	DB       string `mapstructure:"db"`
+	SSLMode  string `mapstructure:"ssl_mode"`
+}
+
+// DSN returns the PostgreSQL connection string.
+func (p PostgresConfig) DSN() string {
+	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		p.User, p.Password, p.Host, p.Port, p.DB, p.SSLMode)
 }
 
 // DetectionConfig holds detection engine settings.
