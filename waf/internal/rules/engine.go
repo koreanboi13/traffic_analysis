@@ -2,6 +2,7 @@ package rules
 
 import (
 	"regexp"
+	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/koreanboi13/traffic_analysis/waf/config"
@@ -9,6 +10,7 @@ import (
 
 // RuleEngine evaluates detection rules against parsed requests.
 type RuleEngine struct {
+	mu         sync.RWMutex
 	rules      []Rule
 	regexCache *lru.Cache[string, *regexp.Regexp]
 	cfg        config.DetectionConfig
@@ -23,9 +25,21 @@ func NewRuleEngine(rules []Rule, cfg config.DetectionConfig) (*RuleEngine, error
 	return &RuleEngine{rules: rules, regexCache: cache, cfg: cfg}, nil
 }
 
+// Reload atomically replaces the rule set and purges the regex cache.
+// It is safe to call concurrently with Evaluate.
+func (e *RuleEngine) Reload(newRules []Rule) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.rules = newRules
+	e.regexCache.Purge()
+}
+
 // Evaluate runs all enabled rules against zone data and returns the result.
 // zoneData maps zone names ("query", "path", "headers", "cookies", "body") to their values.
 func (e *RuleEngine) Evaluate(zoneData map[string][]string) EvaluationResult {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
 	var matches []RuleMatch
 	var score float32
 
