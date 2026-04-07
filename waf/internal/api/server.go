@@ -7,6 +7,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/koreanboi13/traffic_analysis/waf/config"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/api/middleware"
+	chstorage "github.com/koreanboi13/traffic_analysis/waf/internal/events/clickhouse"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/postgres"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/rules"
 	"github.com/rs/cors"
@@ -23,7 +24,7 @@ type Server struct {
 // Public route: POST /api/auth/login
 // Authenticated routes (Analyst + Admin): GET /api/rules, GET /api/rules/{id}
 // Admin-only routes: POST /api/rules, PUT /api/rules/{id}, DELETE /api/rules/{id}
-func NewServer(cfg config.Config, db *postgres.DB, engine *rules.RuleEngine, logger *zap.Logger) *Server {
+func NewServer(cfg config.Config, db *postgres.DB, storage *chstorage.Storage, engine *rules.RuleEngine, logger *zap.Logger) *Server {
 	r := chi.NewRouter()
 
 	// Standard chi middleware
@@ -54,9 +55,11 @@ func NewServer(cfg config.Config, db *postgres.DB, engine *rules.RuleEngine, log
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.JWTMiddleware(secret))
 
-		// Analyst + Admin: read rules
+		// Analyst + Admin: read rules and events
 		r.Get("/api/rules", HandleListRules(db, logger))
 		r.Get("/api/rules/{id}", HandleGetRule(db, logger))
+		r.Get("/api/events", HandleListEvents(storage, logger))
+		r.Post("/api/events/export", HandleExportEvents(storage, logger))
 
 		// Admin only: mutate rules
 		r.Group(func(r chi.Router) {

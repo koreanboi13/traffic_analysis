@@ -7,8 +7,20 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
+
+// EventFilter holds query parameters for filtering events.
+type EventFilter struct {
+	From    *time.Time
+	To      *time.Time
+	IP      string
+	Verdict string
+	RuleID  string
+	Limit   int
+	Offset  int
+}
 
 // Storage manages ClickHouse connection and event persistence.
 type Storage struct {
@@ -214,6 +226,142 @@ func (s *Storage) InsertBatch(ctx context.Context, events []Event) error {
 
 	s.logger.Debug("batch inserted successfully", zap.Int("batch_size", len(events)))
 	return nil
+}
+
+// QueryEvents returns events matching the filter with pagination and a total count.
+func (s *Storage) QueryEvents(ctx context.Context, f EventFilter) ([]Event, int64, error) {
+	// Clamp limit
+	if f.Limit <= 0 {
+		f.Limit = 100
+	}
+	if f.Limit > 100 {
+		f.Limit = 100
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+
+	where, args := s.buildWhere(f)
+
+	// Count query
+	countQuery := fmt.Sprintf("SELECT count() FROM %s.waf_events %s", s.database, where)
+	var total uint64
+	if err := s.conn.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count events: %w", err)
+	}
+
+	// Data query
+	dataQuery := fmt.Sprintf(`SELECT event_id, timestamp, request_id, client_ip, host, method, path,
+		normalized_path, verdict, status_code, latency_ms,
+		raw_query, normalized_query, raw_body, normalized_body,
+		query_params, body_params, headers, user_agent, content_type,
+		referer, cookies, body_truncated, body_size, rule_ids, score
+	FROM %s.waf_events %s ORDER BY timestamp DESC LIMIT %d OFFSET %d`,
+		s.database, where, f.Limit, f.Offset)
+
+	rows, err := s.conn.Query(ctx, dataQuery, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query events: %w", err)
+	}
+	defer rows.Close()
+
+	events, err := s.scanEvents(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return events, int64(total), nil
+}
+
+// ExportEvents returns events matching the filter with a hard cap of 10000 rows.
+func (s *Storage) ExportEvents(ctx context.Context, f EventFilter) ([]Event, error) {
+	if f.Limit <= 0 || f.Limit > 10000 {
+		f.Limit = 10000
+	}
+
+	where, args := s.buildWhere(f)
+
+	query := fmt.Sprintf(`SELECT event_id, timestamp, request_id, client_ip, host, method, path,
+		normalized_path, verdict, status_code, latency_ms,
+		raw_query, normalized_query, raw_body, normalized_body,
+		query_params, body_params, headers, user_agent, content_type,
+		referer, cookies, body_truncated, body_size, rule_ids, score
+	FROM %s.waf_events %s ORDER BY timestamp DESC LIMIT %d`,
+		s.database, where, f.Limit)
+
+	rows, err := s.conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("export events: %w", err)
+	}
+	defer rows.Close()
+
+	return s.scanEvents(rows)
+}
+
+// buildWhere constructs a WHERE clause and args from an EventFilter.
+func (s *Storage) buildWhere(f EventFilter) (string, []interface{}) {
+	var conditions []string
+	var args []interface{}
+
+	if f.IP != "" {
+		conditions = append(conditions, "client_ip = ?")
+		args = append(args, f.IP)
+	}
+	if f.Verdict != "" {
+		conditions = append(conditions, "verdict = ?")
+		args = append(args, f.Verdict)
+	}
+	if f.RuleID != "" {
+		conditions = append(conditions, "has(rule_ids, ?)")
+		args = append(args, f.RuleID)
+	}
+	if f.From != nil {
+		conditions = append(conditions, "timestamp >= ?")
+		args = append(args, *f.From)
+	}
+	if f.To != nil {
+		conditions = append(conditions, "timestamp <= ?")
+		args = append(args, *f.To)
+	}
+
+	if len(conditions) == 0 {
+		return "", nil
+	}
+
+	where := "WHERE "
+	for i, c := range conditions {
+		if i > 0 {
+			where += " AND "
+		}
+		where += c
+	}
+	return where, args
+}
+
+// scanEvents reads rows into Event structs.
+func (s *Storage) scanEvents(rows driver.Rows) ([]Event, error) {
+	var result []Event
+	for rows.Next() {
+		var e Event
+		var ts time.Time
+		var eventID uuid.UUID
+		if err := rows.Scan(
+			&eventID, &ts, &e.RequestID, &e.ClientIP, &e.Host, &e.Method, &e.Path,
+			&e.NormalizedPath, &e.Verdict, &e.StatusCode, &e.LatencyMs,
+			&e.RawQuery, &e.NormalizedQuery, &e.RawBody, &e.NormalizedBody,
+			&e.QueryParams, &e.BodyParams, &e.Headers, &e.UserAgent, &e.ContentType,
+			&e.Referer, &e.Cookies, &e.BodyTruncated, &e.BodySize, &e.RuleIDs, &e.Score,
+		); err != nil {
+			return nil, fmt.Errorf("scan event: %w", err)
+		}
+		e.EventID = eventID
+		e.Timestamp = ts.UnixMilli()
+		result = append(result, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+	return result, nil
 }
 
 // Close closes the ClickHouse connection.
