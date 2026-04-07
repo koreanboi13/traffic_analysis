@@ -12,14 +12,15 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/koreanboi13/traffic_analysis/waf/config"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/api"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/engine"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/events"
-	eventsch "github.com/koreanboi13/traffic_analysis/waf/internal/events/clickhouse"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/metrics"
-	wafmw "github.com/koreanboi13/traffic_analysis/waf/internal/middleware"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/postgres"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/rules"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/adapter/clickhouse"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/adapter/postgres"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/adapter/rulesfile"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/eventwriter"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/transport/api"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/transport/metrics"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/transport/proxy"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/usecase/admin"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/usecase/detection"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/bcrypt"
@@ -45,18 +46,19 @@ func main() {
 	}
 	defer logger.Sync()
 
-	// 4. Connect to ClickHouse.
-	storage, err := eventsch.NewStorage(cfg.ClickHouse.Addr, cfg.ClickHouse.Database, logger)
+	// 4. Connect to ClickHouse and create storage adapter.
+	chStorage, err := clickhouse.NewStorage(cfg.ClickHouse.Addr, cfg.ClickHouse.Database, logger)
 	if err != nil {
 		logger.Fatal("failed to connect to clickhouse", zap.Error(err))
 	}
-	defer storage.Close()
+	defer chStorage.Close()
 
-	writer := events.NewWriter(storage, cfg.ClickHouse.BatchSize, cfg.ClickHouse.FlushInterval, logger)
-	writer.Start()
-	defer writer.Stop()
+	// 5. Create batched event writer backed by the ClickHouse EventWriter interface.
+	ew := eventwriter.NewWriter(chStorage, cfg.ClickHouse.BatchSize, cfg.ClickHouse.FlushInterval, logger)
+	ew.Start()
+	defer ew.Stop()
 
-	// 5. Connect to PostgreSQL.
+	// 6. Connect to PostgreSQL.
 	pgCtx, pgCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer pgCancel()
 
@@ -66,15 +68,19 @@ func main() {
 	}
 	defer pgDB.Close()
 
-	// 6. Seed default admin user if none exists.
+	// Wrap postgres.DB in its domain repository views.
+	ruleRepo := postgres.NewRuleRepository(pgDB)
+	userRepo := postgres.NewUserRepository(pgDB)
+
+	// 7. Seed default admin user if none exists.
 	seedCtx := context.Background()
-	existingAdmin, _ := pgDB.GetUserByUsername(seedCtx, "admin")
+	existingAdmin, _ := userRepo.GetUserByUsername(seedCtx, "admin")
 	if existingAdmin == nil {
 		hash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
 		if err != nil {
 			logger.Fatal("failed to hash default admin password", zap.Error(err))
 		}
-		if _, err := pgDB.CreateUser(seedCtx, "admin", string(hash), "admin"); err != nil {
+		if _, err := userRepo.CreateUser(seedCtx, "admin", string(hash), "admin"); err != nil {
 			logger.Error("failed to seed default admin user", zap.Error(err))
 		} else {
 			logger.Info("default admin user created",
@@ -83,34 +89,35 @@ func main() {
 		}
 	}
 
-	// 7. Seed rules from YAML into PostgreSQL on first startup.
-	dbRules, err := pgDB.ListRules(seedCtx)
+	// 8. Seed rules from YAML into PostgreSQL on first startup.
+	dbRules, err := ruleRepo.ListRules(seedCtx)
 	if err != nil {
 		logger.Fatal("failed to list rules from postgres", zap.Error(err))
 	}
 	if len(dbRules) == 0 {
-		yamlRules, err := rules.LoadFromFile(cfg.Detection.RulesFile)
+		loader := rulesfile.NewLoader()
+		yamlRules, err := loader.Load(cfg.Detection.RulesFile)
 		if err != nil {
 			logger.Fatal("failed to load rules YAML for seeding", zap.Error(err))
 		}
 		for _, r := range yamlRules {
-			if _, err := pgDB.CreateRule(seedCtx, r); err != nil {
+			if _, err := ruleRepo.CreateRule(seedCtx, r); err != nil {
 				logger.Error("failed to seed rule", zap.String("rule_id", r.ID), zap.Error(err))
 			}
 		}
 		logger.Info("rules seeded from YAML into PostgreSQL", zap.Int("count", len(yamlRules)))
 
 		// Re-read rules from DB after seeding.
-		dbRules, err = pgDB.ListRules(seedCtx)
+		dbRules, err = ruleRepo.ListRules(seedCtx)
 		if err != nil {
 			logger.Fatal("failed to list rules after seeding", zap.Error(err))
 		}
 	}
 
-	// 8. Load allowlist from config.
-	allowlistEntries := make([]wafmw.AllowlistEntry, len(cfg.Detection.Allowlist))
+	// 9. Load allowlist from config.
+	allowlistEntries := make([]detection.AllowlistEntry, len(cfg.Detection.Allowlist))
 	for i, e := range cfg.Detection.Allowlist {
-		allowlistEntries[i] = wafmw.AllowlistEntry{
+		allowlistEntries[i] = detection.AllowlistEntry{
 			Comment:    e.Comment,
 			IPs:        e.IPs,
 			Paths:      e.Paths,
@@ -120,66 +127,65 @@ func main() {
 			RuleIDs:    e.RuleIDs,
 		}
 	}
-	allowlist, err := wafmw.NewAllowlist(allowlistEntries)
+	allowlist, err := detection.NewAllowlist(allowlistEntries)
 	if err != nil {
 		logger.Fatal("failed to init allowlist", zap.Error(err))
 	}
 
-	// 9. Initialize RuleEngine from PostgreSQL (source-of-truth).
-	engineRules := make([]rules.Rule, len(dbRules))
-	for i, r := range dbRules {
-		engineRules[i] = r.ToRule()
-	}
-
-	ruleEngine, err := rules.NewRuleEngine(engineRules, cfg.Detection)
+	// 10. Initialize RuleEngine from PostgreSQL (source-of-truth).
+	ruleEngine, err := detection.NewRuleEngine(dbRules, cfg.Detection.BlockThreshold, cfg.Detection.LogThreshold)
 	if err != nil {
 		logger.Fatal("failed to init rule engine", zap.Error(err))
 	}
-	logger.Info("rule engine initialized from PostgreSQL", zap.Int("count", len(engineRules)))
+	logger.Info("rule engine initialized from PostgreSQL", zap.Int("count", len(dbRules)))
 
-	// 10. Create reverse proxy.
-	proxy, err := engine.NewProxy(cfg.Proxy.BackendURL, logger)
+	// 11. Create reverse proxy.
+	reverseProxy, err := proxy.NewProxy(cfg.Proxy.BackendURL, logger)
 	if err != nil {
 		logger.Fatal("failed to create proxy", zap.Error(err))
 	}
 
-	// 11. Create Prometheus metrics.
+	// 12. Create Prometheus metrics.
 	m := metrics.NewMetrics()
 
-	// 12. Setup chi router for proxy.
+	// 13. Setup chi router for proxy server.
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
 
-	// healthz before WAF middleware -- no analysis on healthchecks.
-	r.Get("/healthz", engine.HealthHandler())
+	// Healthz: before WAF middleware — no analysis on health checks.
+	r.Get("/healthz", proxy.HealthHandler())
 
 	// WAF middleware group: Metrics -> Parse -> Normalize -> RecordEvent -> Detect -> Proxy
 	r.Group(func(r chi.Router) {
 		r.Use(metrics.Instrument(m))
-		r.Use(wafmw.Parse(cfg.Analysis.MaxBodySize))
-		r.Use(wafmw.Normalize(cfg.Analysis.MaxDecodePasses, logger))
+		r.Use(proxy.Parse(cfg.Analysis.MaxBodySize))
+		r.Use(proxy.Normalize(cfg.Analysis.MaxDecodePasses))
 
-		recordEvent := wafmw.NewRecordEvent(writer, logger)
+		recordEvent := proxy.NewRecordEvent(ew, logger)
 		r.Use(recordEvent.Handler)
 
-		detect := wafmw.NewDetect(ruleEngine, allowlist, cfg.Detection.Enabled, logger)
+		detect := proxy.NewDetect(ruleEngine, allowlist, cfg.Detection.Enabled, logger)
 		r.Use(detect.Handler)
 
-		r.Handle("/*", proxy)
+		r.Handle("/*", reverseProxy)
 	})
 
-	// 13. Create admin API server.
-	adminSrv := api.NewServer(*cfg, pgDB, storage, ruleEngine, logger)
+	// 14. Create admin API server.
+	jwtSecret := []byte(cfg.Auth.JWTSecret)
+	ruleService := admin.NewRuleService(ruleRepo, ruleEngine)
+	authService := admin.NewAuthService(userRepo, jwtSecret, cfg.Auth.TokenTTL)
+	eventService := admin.NewEventService(chStorage)
 
-	// 14. Create metrics HTTP server.
+	adminSrv := api.NewServer(ruleService, authService, eventService, jwtSecret, nil, logger)
+
+	// 15. Create metrics HTTP server.
 	metricsSrv := metrics.NewMetricsServer(cfg.Metrics.ListenAddr, m)
 
-	// 15. Start three servers with graceful shutdown.
+	// 16. Start three servers with graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	proxyServer := &http.Server{Addr: cfg.Proxy.ListenAddr, Handler: r}
-
 	adminServer := &http.Server{Addr: cfg.AdminAPI.ListenAddr, Handler: adminSrv.Router}
 
 	go func() {
@@ -236,7 +242,6 @@ func setupLogger(cfg config.LoggingConfig) (*zap.Logger, error) {
 		zapCfg = zap.NewProductionConfig()
 	}
 
-	// Parse log level.
 	level, err := zapcore.ParseLevel(cfg.Level)
 	if err != nil {
 		return nil, err
