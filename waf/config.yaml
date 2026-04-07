@@ -15,3 +15,9 @@ clickhouse:
 logging:
   level: "info"
   format: "json"
+
+detection:
+  rules_file: "rules.yaml"
+  log_threshold: 3
+  block_threshold: 7
+  enabled: true

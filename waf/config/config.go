@@ -14,6 +14,15 @@ type Config struct {
 	Analysis   AnalysisConfig   `mapstructure:"analysis"`
 	ClickHouse ClickHouseConfig `mapstructure:"clickhouse"`
 	Logging    LoggingConfig    `mapstructure:"logging"`
+	Detection  DetectionConfig  `mapstructure:"detection"`
+}
+
+// DetectionConfig holds detection engine settings.
+type DetectionConfig struct {
+	RulesFile      string  `mapstructure:"rules_file"`
+	LogThreshold   float32 `mapstructure:"log_threshold"`
+	BlockThreshold float32 `mapstructure:"block_threshold"`
+	Enabled        bool    `mapstructure:"enabled"`
 }
 
 // ProxyConfig holds reverse proxy settings.
