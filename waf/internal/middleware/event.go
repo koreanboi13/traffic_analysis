@@ -2,12 +2,12 @@ package middleware
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
-	"reflect"
 	"time"
 
-	ch "github.com/koreanboi13/traffic_analysis/waf/internal/events/clickhouse"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/events"
+	ch "github.com/koreanboi13/traffic_analysis/waf/internal/events/clickhouse"
 	"go.uber.org/zap"
 )
 
@@ -67,34 +67,24 @@ func NewRecordEvent(writer *events.Writer, logger *zap.Logger) *RecordEvent {
 // Handler возвращает http.HandlerFunc middleware
 func (m *RecordEvent) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Засекаем время начала обработки запроса
 		startTime := time.Now()
-
-		// Создаём обёртку для response writer
 		rw := newResponseWriter(w)
 
-		// Получаем ParsedRequest из контекста
+		// Pass request to next handler (proxy / detect middleware).
+		next.ServeHTTP(rw, r)
+
+		// Read ParsedRequest AFTER next — so Phase 4 detect can update verdict/score.
 		parsedReq := GetParsedRequest(r.Context())
 		if parsedReq == nil {
 			m.logger.Warn("parsed request not found in context, skipping event recording",
 				zap.String("path", r.URL.Path),
 				zap.String("method", r.Method),
 			)
-			// Пропускаем запрос дальше, даже если нет данных для логирования
-			next.ServeHTTP(rw, r)
 			return
 		}
 
-		// Пропускаем запрос к следующему обработчику (proxy)
-		next.ServeHTTP(rw, r)
-
-		// Вычисляем задержку в миллисекундах
 		latencyMs := float32(time.Since(startTime).Nanoseconds()) / 1_000_000.0
-
-		// Собираем событие
 		event := m.buildEvent(parsedReq, rw.StatusCode(), latencyMs)
-
-		// Отправляем событие через writer
 		m.writer.Send(event)
 
 		m.logger.Debug("event recorded",
@@ -124,7 +114,7 @@ func (m *RecordEvent) buildEvent(parsedReq *ParsedRequest, statusCode int, laten
 
 	// Создаём событие
 	event := ch.Event{}
-	
+
 	// Заполняем базовые поля
 	event.RequestID = parsedReq.RequestID
 	event.ClientIP = parsedReq.ClientIP
@@ -154,8 +144,8 @@ func (m *RecordEvent) buildEvent(parsedReq *ParsedRequest, statusCode int, laten
 	}
 
 	// Заполняем плейсхолдеры для Phase 4
-	event.TriggeredRulesIDs = []string{} // Пустой массив строк
-	event.RiskScore = 0.0
+	event.RuleIDs = []string{} // Пустой массив строк
+	event.Score = 0.0
 
 	return event
 }
@@ -165,8 +155,7 @@ func serializeToJSON(data interface{}, logger *zap.Logger) string {
 	if data == nil {
 		return "{}"
 	}
-	
-	// Проверяем пустые map'ы
+
 	switch v := data.(type) {
 	case map[string]interface{}:
 		if len(v) == 0 {
@@ -176,24 +165,20 @@ func serializeToJSON(data interface{}, logger *zap.Logger) string {
 		if len(v) == 0 {
 			return "{}"
 		}
+	case []BodyParam:
+		if len(v) == 0 {
+			return "[]"
+		}
 	}
-	
+
 	jsonBytes, err := json.Marshal(data)
 	if err != nil {
 		logger.Warn("failed to serialize to JSON",
 			zap.Error(err),
-			zap.String("type", getType(data)),
+			zap.String("type", fmt.Sprintf("%T", data)),
 		)
 		return "{}"
 	}
-	
-	return string(jsonBytes)
-}
 
-// getType возвращает строковое представление типа для логирования
-func getType(v interface{}) string {
-	if v == nil {
-		return "nil"
-	}
-	return reflect.TypeOf(v).String()
+	return string(jsonBytes)
 }

@@ -121,20 +121,13 @@ func (s *Storage) migrateNewColumns(ctx context.Context, database string) error 
 	for _, col := range columns {
 		alterQuery := fmt.Sprintf("ALTER TABLE %s.waf_events ADD COLUMN IF NOT EXISTS %s %s",
 			database, col.name, col.typ)
-		
+
 		if col.modifier != "" {
 			alterQuery += " " + col.modifier
 		}
-		
+
 		if err := s.conn.Exec(ctx, alterQuery); err != nil {
-			// Логируем ошибку, но продолжаем миграцию
-			// Некоторые колонки могли уже существовать
-			s.logger.Warn("failed to add column",
-				zap.String("column", col.name),
-				zap.Error(err),
-			)
-			// Не возвращаем ошибку, чтобы не блокировать запуск
-			// Колонка может уже существовать
+			return fmt.Errorf("alter table add column %s: %w", col.name, err)
 		}
 	}
 
@@ -175,10 +168,10 @@ func (s *Storage) InsertBatch(ctx context.Context, events []Event) error {
 	for _, event := range events {
 		// Convert verdict string to the appropriate type
 		// ClickHouse driver handles Enum8 conversion automatically from string
-		
+
 		// Convert bool to uint8 (0 or 1) for body_truncated
 		bodyTruncated := event.BodyTruncated
-		
+
 		err := batch.Append(
 			// Base fields (10 fields)
 			event.EventID,
@@ -206,8 +199,8 @@ func (s *Storage) InsertBatch(ctx context.Context, events []Event) error {
 			event.Cookies,
 			bodyTruncated,
 			event.BodySize,
-			event.TriggeredRulesIDs,
-			event.RiskScore,
+			event.RuleIDs,
+			event.Score,
 		)
 		if err != nil {
 			return fmt.Errorf("append event to batch: %w (event_id: %s)", err, event.EventID)

@@ -7,17 +7,17 @@ import (
 // Event представляет событие WAF, которое будет записано в ClickHouse
 type Event struct {
 	// === Базовые поля ===
-	EventID    uuid.UUID `json:"event_id" db:"event_id"`       // Идентификатор события (UUID)
-	Timestamp  int64     `json:"timestamp" db:"timestamp"`     // Метка времени (Unix миллисекунды)
-	RequestID  string    `json:"request_id" db:"request_id"`   // ID запроса
-	ClientIP   string    `json:"client_ip" db:"client_ip"`     // IP клиента
-	Host       string    `json:"host" db:"host"`               // Хост
-	Method     string    `json:"method" db:"method"`           // HTTP метод
-	Path       string    `json:"path" db:"path"`               // Путь запроса
-	NormalizedPath string `json:"normalized_path,omitempty" db:"normalized_path"` // Нормализованный путь
-	Verdict    string    `json:"verdict" db:"verdict"`         // Вердикт: "allow", "block" или "log_only"
-	StatusCode uint16    `json:"status_code" db:"status_code"` // HTTP код ответа
-	LatencyMs  float32   `json:"latency_ms" db:"latency_ms"`   // Задержка в миллисекундах
+	EventID        uuid.UUID `json:"event_id" db:"event_id"`                         // Идентификатор события (UUID)
+	Timestamp      int64     `json:"timestamp" db:"timestamp"`                       // Метка времени (Unix миллисекунды)
+	RequestID      string    `json:"request_id" db:"request_id"`                     // ID запроса
+	ClientIP       string    `json:"client_ip" db:"client_ip"`                       // IP клиента
+	Host           string    `json:"host" db:"host"`                                 // Хост
+	Method         string    `json:"method" db:"method"`                             // HTTP метод
+	Path           string    `json:"path" db:"path"`                                 // Путь запроса
+	NormalizedPath string    `json:"normalized_path,omitempty" db:"normalized_path"` // Нормализованный путь
+	Verdict        string    `json:"verdict" db:"verdict"`                           // Вердикт: "allow", "block" или "log_only"
+	StatusCode     uint16    `json:"status_code" db:"status_code"`                   // HTTP код ответа
+	LatencyMs      float32   `json:"latency_ms" db:"latency_ms"`                     // Задержка в миллисекундах
 
 	// === Расширенные поля ===
 	RawQuery        string `json:"raw_query,omitempty" db:"raw_query"`               // Сырая query string
@@ -35,6 +35,6 @@ type Event struct {
 	BodySize        uint32 `json:"body_size" db:"body_size"`                         // Размер тела
 
 	// === Плейсхолдеры для Phase 4 ===
-	TriggeredRulesIDs []string `json:"triggered_rules_ids,omitempty" db:"triggered_rules_ids"` // Массив ID сработавших правил
-	RiskScore         float32  `json:"risk_score,omitempty" db:"risk_score"`                   // Risk score
+	RuleIDs []string `json:"triggered_rules_ids,omitempty" db:"triggered_rules_ids"` // Массив ID сработавших правил
+	Score   float32  `json:"risk_score,omitempty" db:"risk_score"`                   // Risk score
 }

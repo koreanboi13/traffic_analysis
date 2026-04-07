@@ -66,10 +66,14 @@ func normalizeQueryParams(params map[string]string, maxPasses int, logger *zap.L
 
 	normalized := make(map[string]string, len(params))
 	for key, value := range params {
+		normalizedKey := normalizeString(key, maxPasses, logger)
 		normalizedValue := normalizeString(value, maxPasses, logger)
-		normalized[key] = normalizedValue
-		if normalizedValue != value {
-			logger.Debug("normalize query param: value changed", zap.String("key", key))
+		normalized[normalizedKey] = normalizedValue
+		if normalizedValue != value || normalizedKey != key {
+			logger.Debug("normalize query param: changed",
+				zap.String("orig_key", key),
+				zap.String("norm_key", normalizedKey),
+			)
 		}
 	}
 
@@ -110,8 +114,8 @@ func normalizeString(input string, maxPasses int, logger *zap.Logger) string {
 
 func normalizePath(input string, maxPasses int, logger *zap.Logger) string {
 	decoded := decodeURLMultiPass(input, maxPasses, logger)
-	decoded = path.Clean(decoded)
 	decoded = html.UnescapeString(decoded)
+	decoded = path.Clean(decoded)
 	decoded = strings.ToLower(decoded)
 	decoded = strings.ReplaceAll(decoded, "\x00", "")
 	return decoded

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"os"
@@ -45,9 +44,7 @@ func main() {
 	defer storage.Close()
 
 	writer := events.NewWriter(storage, cfg.ClickHouse.BatchSize, cfg.ClickHouse.FlushInterval, logger)
-	writerCtx, cancelWriter := context.WithCancel(context.Background())
-	defer cancelWriter()
-	writer.Start(writerCtx)
+	writer.Start()
 	defer writer.Stop()
 
 	// 5. Create reverse proxy.

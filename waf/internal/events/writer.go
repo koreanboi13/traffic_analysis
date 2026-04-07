@@ -40,9 +40,10 @@ func NewWriter(storage Storage, batchSize int, flushInterval time.Duration, logg
 	}
 }
 
-// Start запускает горутину с основным циклом обработки событий
-func (w *Writer) Start(ctx context.Context) {
-	go w.run(ctx)
+// Start запускает горутину с основным циклом обработки событий.
+// Shutdown is handled by Stop() which closes the event channel.
+func (w *Writer) Start() {
+	go w.run()
 }
 
 // Send отправляет событие в канал (неблокирующая операция)
@@ -79,7 +80,7 @@ func (w *Writer) Stop() {
 }
 
 // run основной цикл обработки событий
-func (w *Writer) run(ctx context.Context) {
+func (w *Writer) run() {
 	defer close(w.doneCh)
 
 	// Локальный буфер для накопления событий
@@ -98,48 +99,26 @@ func (w *Writer) run(ctx context.Context) {
 		select {
 		case event, ok := <-w.eventCh:
 			if !ok {
-				// Канал закрыт - дописываем оставшиеся события и выходим
+				// Channel closed by Stop() — flush remaining and exit.
 				if len(buffer) > 0 {
 					w.flushWithTimeout(buffer)
 				}
-				w.logger.Info("event channel closed, writer shutting down")
+				w.logger.Info("event writer shutdown completed")
 				return
 			}
 
-			// Добавляем событие в буфер
 			buffer = append(buffer, event)
 
-			// Если буфер достиг batch_size - делаем flush
 			if len(buffer) >= w.batchSize {
 				w.flushWithTimeout(buffer)
-				// Создаём новый буфер
 				buffer = make([]events2.Event, 0, w.batchSize)
 			}
 
 		case <-ticker.C:
-			// По таймеру: если в буфере есть события - делаем flush
 			if len(buffer) > 0 {
 				w.flushWithTimeout(buffer)
-				// Создаём новый буфер
 				buffer = make([]events2.Event, 0, w.batchSize)
 			}
-
-		case <-ctx.Done():
-			// Контекст отменён - завершаем работу
-			w.logger.Info("context cancelled, flushing remaining events and shutting down")
-
-			// Читаем все оставшиеся события из канала
-			for event := range w.eventCh {
-				buffer = append(buffer, event)
-			}
-
-			// Flush оставшихся событий
-			if len(buffer) > 0 {
-				w.flushWithTimeout(buffer)
-			}
-
-			w.logger.Info("writer shutdown completed")
-			return
 		}
 	}
 }

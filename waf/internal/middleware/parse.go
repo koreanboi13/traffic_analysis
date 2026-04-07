@@ -32,7 +32,7 @@ func Parse(maxBodySize int) func(http.Handler) http.Handler {
 				Referer:     r.Referer(),
 				ContentType: r.Header.Get("Content-Type"),
 				Host:        r.Host,
-				ClientIP:    clientIPFromRemoteAddr(r.RemoteAddr),
+				ClientIP:    extractClientIP(r),
 			}
 
 			rawBody, truncated := readBodyLimited(r.Body, maxBodySize)
@@ -41,7 +41,13 @@ func Parse(maxBodySize int) func(http.Handler) http.Handler {
 			pr.BodySize = len(rawBody)
 			pr.BodyParams = extractBodyParams(rawBody, pr.ContentType)
 
-			r.Body = io.NopCloser(bytes.NewReader(rawBody))
+			// Reassemble body: buffered prefix + remaining original stream.
+			// If body was truncated, r.Body still has the unread tail.
+			if truncated {
+				r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(rawBody), r.Body))
+			} else {
+				r.Body = io.NopCloser(bytes.NewReader(rawBody))
+			}
 			next.ServeHTTP(w, r.WithContext(WithParsedRequest(r.Context(), pr)))
 		})
 	}
@@ -94,11 +100,13 @@ func extractCookies(cookies []*http.Cookie) map[string]string {
 	return result
 }
 
+// readBodyLimited reads up to maxBodySize bytes from body.
+// If body exceeds maxBodySize, returns truncated data and true.
+// IMPORTANT: does NOT close body — caller is responsible for reassembly.
 func readBodyLimited(body io.ReadCloser, maxBodySize int) ([]byte, bool) {
 	if body == nil {
 		return nil, false
 	}
-	defer body.Close()
 
 	limited := io.LimitReader(body, int64(maxBodySize)+1)
 	data, err := io.ReadAll(limited)
@@ -140,35 +148,62 @@ func extractBodyParams(rawBody []byte, contentType string) []BodyParam {
 		if err := json.Unmarshal(rawBody, &object); err != nil {
 			return nil
 		}
-		params := make([]BodyParam, 0, len(object))
-		for key, value := range object {
-			params = append(params, BodyParam{Key: key, Value: stringifyJSONValue(value), Source: "json"})
-		}
+		var params []BodyParam
+		flattenJSON(object, "", &params, 0, 5)
 		return params
 	}
 
 	return nil
 }
 
-func stringifyJSONValue(v interface{}) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case nil:
-		return ""
-	default:
-		encoded, err := json.Marshal(t)
-		if err != nil {
-			return ""
+// flattenJSON recursively flattens a JSON object into dot-notation BodyParams.
+// maxDepth limits recursion to prevent stack overflow on deeply nested input.
+func flattenJSON(data map[string]interface{}, prefix string, params *[]BodyParam, depth, maxDepth int) {
+	for key, value := range data {
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
 		}
-		return string(encoded)
+
+		switch v := value.(type) {
+		case map[string]interface{}:
+			if depth < maxDepth {
+				flattenJSON(v, fullKey, params, depth+1, maxDepth)
+			} else {
+				// Max depth reached — serialize remainder as JSON string
+				encoded, _ := json.Marshal(v)
+				*params = append(*params, BodyParam{Key: fullKey, Value: string(encoded), Source: "json"})
+			}
+		case []interface{}:
+			// Arrays: serialize as JSON string (individual element scanning is Phase 4)
+			encoded, _ := json.Marshal(v)
+			*params = append(*params, BodyParam{Key: fullKey, Value: string(encoded), Source: "json"})
+		case string:
+			*params = append(*params, BodyParam{Key: fullKey, Value: v, Source: "json"})
+		case nil:
+			*params = append(*params, BodyParam{Key: fullKey, Value: "", Source: "json"})
+		default:
+			encoded, _ := json.Marshal(v)
+			*params = append(*params, BodyParam{Key: fullKey, Value: string(encoded), Source: "json"})
+		}
 	}
 }
 
-func clientIPFromRemoteAddr(remoteAddr string) string {
-	host, _, err := net.SplitHostPort(remoteAddr)
+// extractClientIP returns the client IP using X-Real-IP → X-Forwarded-For (first) → RemoteAddr.
+func extractClientIP(r *http.Request) string {
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return strings.TrimSpace(ip)
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// X-Forwarded-For: client, proxy1, proxy2 — take first
+		if idx := strings.IndexByte(xff, ','); idx != -1 {
+			return strings.TrimSpace(xff[:idx])
+		}
+		return strings.TrimSpace(xff)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {
 		return host
 	}
-	return remoteAddr
+	return r.RemoteAddr
 }
