@@ -11,161 +11,59 @@ import (
 	"time"
 
 	"github.com/koreanboi13/traffic_analysis/waf/config"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/adapter/clickhouse"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/adapter/postgres"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/adapter/rulesfile"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/app/admin"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/app"
 	"github.com/koreanboi13/traffic_analysis/waf/internal/app/metrics"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/app/proxy"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/eventwriter"
-	useadmin "github.com/koreanboi13/traffic_analysis/waf/internal/usecase/admin"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/usecase/detection"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
-	// 1. Determine config path.
+	// 1. Load configuration
 	configPath := os.Getenv("WAF_CONFIG_PATH")
 	if configPath == "" {
 		configPath = "config.yaml"
 	}
 
-	// 2. Load configuration.
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	// 3. Setup logger.
-	logger, err := setupLogger(cfg.Logging)
+	// 2. Create DI container
+	container := app.NewContainer(cfg)
+
+	// 3. Get logger for startup messages
+	logger, err := container.Logger()
 	if err != nil {
-		log.Fatalf("failed to setup logger: %v", err)
+		log.Fatalf("failed to get logger: %v", err)
 	}
-	defer logger.Sync()
+	defer container.Close()
 
-	// 4. Connect to ClickHouse and create storage adapter.
-	chStorage, err := clickhouse.NewStorage(cfg.ClickHouse.Addr, cfg.ClickHouse.Database, logger)
-	if err != nil {
-		logger.Fatal("failed to connect to clickhouse", zap.Error(err))
-	}
-	defer chStorage.Close()
-
-	// 5. Create batched event writer backed by the ClickHouse EventWriter interface.
-	ew := eventwriter.NewWriter(chStorage, cfg.ClickHouse.BatchSize, cfg.ClickHouse.FlushInterval, logger)
-	ew.Start()
-	defer ew.Stop()
-
-	// 6. Connect to PostgreSQL.
-	pgCtx, pgCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer pgCancel()
-
-	pgDB, err := postgres.NewDB(pgCtx, cfg.Postgres.DSN(), logger)
-	if err != nil {
-		logger.Fatal("failed to connect to postgres", zap.Error(err))
-	}
-	defer pgDB.Close()
-
-	// Wrap postgres.DB in its domain repository views.
-	ruleRepo := postgres.NewRuleRepository(pgDB)
-	userRepo := postgres.NewUserRepository(pgDB)
-
-	// 7. Seed default admin user if none exists.
+	// 4. Seed defaults (admin user, rules)
 	seedCtx := context.Background()
-	existingAdmin, _ := userRepo.GetUserByUsername(seedCtx, "admin")
-	if existingAdmin == nil {
-		hash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
-		if err != nil {
-			logger.Fatal("failed to hash default admin password", zap.Error(err))
-		}
-		if _, err := userRepo.CreateUser(seedCtx, "admin", string(hash), "admin"); err != nil {
-			logger.Error("failed to seed default admin user", zap.Error(err))
-		} else {
-			logger.Info("default admin user created",
-				zap.String("username", "admin"),
-				zap.String("note", "change default password immediately"))
-		}
+	if err := container.SeedDefaults(seedCtx); err != nil {
+		logger.Error("seed failed", zap.Error(err))
+		// Continue even if seed fails - maybe rules already exist
 	}
 
-	// 8. Seed rules from YAML into PostgreSQL on first startup.
-	dbRules, err := ruleRepo.ListRules(seedCtx)
+	// 5. Get routers
+	proxyRouter, err := container.ProxyRouter()
 	if err != nil {
-		logger.Fatal("failed to list rules from postgres", zap.Error(err))
-	}
-	if len(dbRules) == 0 {
-		loader := rulesfile.NewLoader()
-		yamlRules, err := loader.Load(cfg.Detection.RulesFile)
-		if err != nil {
-			logger.Fatal("failed to load rules YAML for seeding", zap.Error(err))
-		}
-		for _, r := range yamlRules {
-			if _, err := ruleRepo.CreateRule(seedCtx, r); err != nil {
-				logger.Error("failed to seed rule", zap.String("rule_id", r.ID), zap.Error(err))
-			}
-		}
-		logger.Info("rules seeded from YAML into PostgreSQL", zap.Int("count", len(yamlRules)))
-
-		// Re-read rules from DB after seeding.
-		dbRules, err = ruleRepo.ListRules(seedCtx)
-		if err != nil {
-			logger.Fatal("failed to list rules after seeding", zap.Error(err))
-		}
+		logger.Fatal("failed to create proxy router", zap.Error(err))
 	}
 
-	// 9. Load allowlist from config.
-	allowlistEntries := make([]detection.AllowlistEntry, len(cfg.Detection.Allowlist))
-	for i, e := range cfg.Detection.Allowlist {
-		allowlistEntries[i] = detection.AllowlistEntry{
-			Comment:    e.Comment,
-			IPs:        e.IPs,
-			Paths:      e.Paths,
-			Headers:    e.Headers,
-			UserAgents: e.UserAgents,
-			Params:     e.Params,
-			RuleIDs:    e.RuleIDs,
-		}
-	}
-	allowlist, err := detection.NewAllowlist(allowlistEntries)
+	adminRouter, err := container.AdminRouter()
 	if err != nil {
-		logger.Fatal("failed to init allowlist", zap.Error(err))
+		logger.Fatal("failed to create admin router", zap.Error(err))
 	}
 
-	// 10. Initialize RuleEngine from PostgreSQL (source-of-truth).
-	ruleEngine, err := detection.NewRuleEngine(dbRules, cfg.Detection.BlockThreshold, cfg.Detection.LogThreshold)
+	// 6. Get metrics server
+	m, err := container.Metrics()
 	if err != nil {
-		logger.Fatal("failed to init rule engine", zap.Error(err))
+		logger.Fatal("failed to get metrics", zap.Error(err))
 	}
-	logger.Info("rule engine initialized from PostgreSQL", zap.Int("count", len(dbRules)))
-
-	// 11. Create reverse proxy.
-	reverseProxy, err := proxy.NewProxy(cfg.Proxy.BackendURL, logger)
-	if err != nil {
-		logger.Fatal("failed to create proxy", zap.Error(err))
-	}
-
-	// 12. Create Prometheus metrics.
-	m := metrics.NewMetrics()
-
-	// 13. Build proxy router with WAF pipeline.
-	proxyRouter := proxy.NewRouter(proxy.RouterConfig{
-		MaxBodySize:      cfg.Analysis.MaxBodySize,
-		MaxDecodePasses:  cfg.Analysis.MaxDecodePasses,
-		DetectionEnabled: cfg.Detection.Enabled,
-	}, reverseProxy, ruleEngine, allowlist, ew, m, logger)
-
-	// 14. Build admin API router.
-	jwtSecret := []byte(cfg.Auth.JWTSecret)
-	ruleService := useadmin.NewRuleService(ruleRepo, ruleEngine)
-	authService := useadmin.NewAuthService(userRepo, jwtSecret, cfg.Auth.TokenTTL)
-	eventService := useadmin.NewEventService(chStorage)
-
-	adminRouter := admin.NewRouter(ruleService, authService, eventService, jwtSecret, nil, logger)
-
-	// 15. Create metrics HTTP server.
 	metricsSrv := metrics.NewServer(cfg.Metrics.ListenAddr, m)
 
-	// 16. Start three servers with graceful shutdown.
+	// 7. Start servers with graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -215,24 +113,4 @@ func main() {
 	wg.Wait()
 
 	logger.Info("all servers stopped")
-}
-
-// setupLogger creates a zap.Logger based on logging config.
-func setupLogger(cfg config.LoggingConfig) (*zap.Logger, error) {
-	var zapCfg zap.Config
-
-	switch cfg.Format {
-	case "console":
-		zapCfg = zap.NewDevelopmentConfig()
-	default:
-		zapCfg = zap.NewProductionConfig()
-	}
-
-	level, err := zapcore.ParseLevel(cfg.Level)
-	if err != nil {
-		return nil, err
-	}
-	zapCfg.Level.SetLevel(level)
-
-	return zapCfg.Build()
 }
