@@ -66,12 +66,18 @@ func (db *DB) migrate(ctx context.Context) error {
 			targets    TEXT[] DEFAULT '{}',
 			weight     REAL NOT NULL DEFAULT 1.0,
 			enabled    BOOLEAN NOT NULL DEFAULT TRUE,
+			log_only   BOOLEAN NOT NULL DEFAULT FALSE,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
 	`)
 	if err != nil {
 		return fmt.Errorf("create rules table: %w", err)
+	}
+
+	_, err = db.Pool.Exec(ctx, `ALTER TABLE rules ADD COLUMN IF NOT EXISTS log_only BOOLEAN NOT NULL DEFAULT FALSE`)
+	if err != nil {
+		return fmt.Errorf("add log_only column: %w", err)
 	}
 
 	return nil

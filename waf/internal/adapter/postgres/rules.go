@@ -15,7 +15,7 @@ import (
 var psql = sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
 
 // ruleColumns is the ordered list of columns used in every SELECT / RETURNING clause.
-const ruleColumns = "id, rule_id, name, type, category, pattern, heuristic, threshold, targets, weight, enabled, created_at, updated_at"
+const ruleColumns = "id, rule_id, name, type, category, pattern, heuristic, threshold, targets, weight, enabled, log_only, created_at, updated_at"
 
 // ruleRow is a private struct for scanning DB rows, with DB metadata fields.
 type ruleRow struct {
@@ -30,6 +30,7 @@ type ruleRow struct {
 	targets   []string
 	weight    float32
 	enabled   bool
+	logOnly   bool
 	createdAt time.Time
 	updatedAt time.Time
 }
@@ -47,6 +48,7 @@ func (r *ruleRow) toDomain() domain.Rule {
 		Targets:   r.targets,
 		Weight:    r.weight,
 		Enabled:   r.enabled,
+		LogOnly:   r.logOnly,
 	}
 }
 
@@ -57,7 +59,7 @@ func scanRuleRow(scanner interface {
 	return scanner.Scan(
 		&row.id, &row.ruleID, &row.name, &row.ruleType, &row.category,
 		&row.pattern, &row.heuristic, &row.threshold, &row.targets,
-		&row.weight, &row.enabled, &row.createdAt, &row.updatedAt,
+		&row.weight, &row.enabled, &row.logOnly, &row.createdAt, &row.updatedAt,
 	)
 }
 
@@ -125,8 +127,8 @@ func (r *RuleRepository) GetRule(ctx context.Context, ruleID string) (*domain.Ru
 func (r *RuleRepository) CreateRule(ctx context.Context, rule domain.Rule) (*domain.Rule, error) {
 	query, args, err := psql.
 		Insert("rules").
-		Columns("rule_id", "name", "type", "category", "pattern", "heuristic", "threshold", "targets", "weight", "enabled").
-		Values(rule.ID, rule.Name, rule.Type, rule.Category, rule.Pattern, rule.Heuristic, rule.Threshold, rule.Targets, rule.Weight, rule.Enabled).
+		Columns("rule_id", "name", "type", "category", "pattern", "heuristic", "threshold", "targets", "weight", "enabled", "log_only").
+		Values(rule.ID, rule.Name, rule.Type, rule.Category, rule.Pattern, rule.Heuristic, rule.Threshold, rule.Targets, rule.Weight, rule.Enabled, rule.LogOnly).
 		Suffix("RETURNING " + ruleColumns).
 		ToSql()
 	if err != nil {
@@ -156,6 +158,7 @@ func (r *RuleRepository) UpdateRule(ctx context.Context, ruleID string, rule dom
 			"targets":    rule.Targets,
 			"weight":     rule.Weight,
 			"enabled":    rule.Enabled,
+			"log_only":   rule.LogOnly,
 			"updated_at": sq.Expr("NOW()"),
 		}).
 		Where(sq.Eq{"rule_id": ruleID}).

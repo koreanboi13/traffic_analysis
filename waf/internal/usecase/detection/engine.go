@@ -88,7 +88,9 @@ func (e *RuleEngine) Evaluate(zoneData map[string][]string) domain.EvaluationRes
 						Zone:     zone,
 						Value:    truncated,
 					})
-					score += rule.Weight
+					if !rule.LogOnly {
+						score += rule.Weight
+					}
 					goto nextRule
 				}
 			}

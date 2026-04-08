@@ -22,6 +22,7 @@ type yamlRule struct {
 	Targets   []string `yaml:"targets"`             // "query", "headers", "cookies", "body", "path"; empty = all
 	Weight    float32  `yaml:"weight"`              // 1-10
 	Enabled   bool     `yaml:"enabled"`
+	LogOnly   bool     `yaml:"log_only,omitempty"`
 }
 
 // toDomain converts a yamlRule to a domain.Rule.
@@ -37,6 +38,7 @@ func (y yamlRule) toDomain() domain.Rule {
 		Targets:   y.Targets,
 		Weight:    y.Weight,
 		Enabled:   y.Enabled,
+		LogOnly:   y.LogOnly,
 	}
 }
 

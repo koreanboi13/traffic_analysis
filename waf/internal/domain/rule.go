@@ -12,6 +12,7 @@ type Rule struct {
 	Targets   []string // "query", "headers", "cookies", "body", "path"; empty = all
 	Weight    float32  // 1-10
 	Enabled   bool
+	LogOnly   bool
 }
 
 // RuleMatch records a single rule match during evaluation.

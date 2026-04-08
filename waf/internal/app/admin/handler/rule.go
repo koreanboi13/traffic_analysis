@@ -31,6 +31,7 @@ type RuleRequest struct {
 	Targets   []string `json:"targets"`
 	Weight    float32  `json:"weight"`
 	Enabled   bool     `json:"enabled"`
+	LogOnly   bool     `json:"log_only"`
 }
 
 // HandleListRules returns an http.HandlerFunc that lists all rules.
@@ -101,6 +102,7 @@ func HandleCreateRule(ruleService RuleService, logger *zap.Logger) http.HandlerF
 			Targets:   req.Targets,
 			Weight:    req.Weight,
 			Enabled:   req.Enabled,
+			LogOnly:   req.LogOnly,
 		}
 
 		created, err := ruleService.CreateRule(r.Context(), rule)
@@ -146,6 +148,7 @@ func HandleUpdateRule(ruleService RuleService, logger *zap.Logger) http.HandlerF
 			Targets:   req.Targets,
 			Weight:    req.Weight,
 			Enabled:   req.Enabled,
+			LogOnly:   req.LogOnly,
 		}
 
 		updated, err := ruleService.UpdateRule(r.Context(), ruleID, rule)
