@@ -1,0 +1,56 @@
+services:
+  teststand-db:
+    restart: unless-stopped
+    volumes:
+      - teststand-db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${TEST_POSTGRES_DB}
+      POSTGRES_USER: ${TEST_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD}
+    
+
+  teststand-app:
+    environment:
+      DATABASE_URL: postgres://${TEST_POSTGRES_USER}:${TEST_POSTGRES_PASSWORD}@teststand-db:5432/${TEST_POSTGRES_DB}?sslmode=disable
+    restart: unless-stopped
+
+  clickhouse:
+    restart: unless-stopped
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+    ports: []
+    expose:
+      - "8123:8123"
+
+  waf-postgres:
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${WAF_POSTGRES_DB}
+      POSTGRES_USER: ${WAF_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${WAF_POSTGRES_PASSWORD}
+    volumes:
+      - waf-postgres-data:/var/lib/postgresql/data
+
+  waf:
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+      - "8090:8090"
+      - "9090:9090"
+    environment:
+      WAF_CONFIG_PATH: ${WAF_CONFIG_PATH}
+      WAF_POSTGRES_HOST: ${WAF_POSTGRES_HOST}
+      WAF_POSTGRES_PORT: ${WAF_POSTGRES_PORT}
+      WAF_POSTGRES_USER: ${WAF_POSTGRES_USER}
+      WAF_POSTGRES_PASSWORD: ${WAF_POSTGRES_PASSWORD}
+      WAF_POSTGRES_DB: ${WAF_POSTGRES_DB}
+      WAF_POSTGRES_SSL_MODE: ${WAF_POSTGRES_SSL_MODE}
+
+
+
+volumes:
+  teststand-db-data:
+  clickhouse-data:
+  clickhouse-logs:
+  waf-postgres-data:
