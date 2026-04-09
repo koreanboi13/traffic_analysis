@@ -1,0 +1,663 @@
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: Traffic Analysis WAF API
+  description: REST API для управления WAF — правила детекции, события безопасности, аутентификация.
+servers:
+  - url: http://localhost:8090
+    description: Admin API (development)
+paths:
+  /api/auth/login:
+    post:
+      summary: Аутентификация пользователя
+      operationId: login
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: admin
+              password: password123
+      responses:
+        '200':
+          description: Успешная аутентификация
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Невалидное тело запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Неверный логин или пароль
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/health:
+    get:
+      summary: Health check Admin API
+      operationId: healthCheck
+      tags:
+        - health
+      responses:
+        '200':
+          description: Сервис доступен
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/rules:
+    get:
+      summary: Получение списка всех правил
+      operationId: listRules
+      tags:
+        - rules
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Массив правил
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Rule'
+        '401':
+          description: Невалидный или отсутствующий токен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      summary: Создание нового правила
+      operationId: createRule
+      tags:
+        - rules
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleRequest'
+            example:
+              rule_id: custom-001
+              name: Custom SQLi pattern
+              type: regex
+              category: sqli
+              pattern: "(?i)exec\\s*\\("
+              targets:
+                - query
+                - body
+              weight: 6
+              enabled: true
+              log_only: false
+      responses:
+        '201':
+          description: Правило создано
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '400':
+          description: Невалидное тело или отсутствуют обязательные поля
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Невалидный токен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Недостаточно прав (роль не Admin)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/rules/{id}:
+    get:
+      summary: Получение правила по ID
+      operationId: getRule
+      tags:
+        - rules
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор правила
+          schema:
+            type: string
+          example: sqli-sig-001
+      responses:
+        '200':
+          description: Объект правила
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '401':
+          description: Невалидный токен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Правило не найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      summary: Обновление правила
+      operationId: updateRule
+      tags:
+        - rules
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор правила
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleRequest'
+      responses:
+        '200':
+          description: Правило обновлено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '400':
+          description: Невалидное тело запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Невалидный токен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Недостаточно прав
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Правило не найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: Удаление правила
+      operationId: deleteRule
+      tags:
+        - rules
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор правила
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Правило удалено
+        '401':
+          description: Невалидный токен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Недостаточно прав
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/events:
+    get:
+      summary: Получение списка событий с фильтрацией
+      operationId: listEvents
+      tags:
+        - events
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          description: Количество записей (макс. 100)
+          required: false
+          schema:
+            type: integer
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Смещение для пагинации
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - name: ip
+          in: query
+          description: Фильтр по IP-адресу клиента
+          required: false
+          schema:
+            type: string
+          example: "192.168.1.1"
+        - name: verdict
+          in: query
+          description: Фильтр по вердикту
+          required: false
+          schema:
+            type: string
+            enum:
+              - allow
+              - block
+              - log_only
+        - name: rule_id
+          in: query
+          description: Фильтр по ID сработавшего правила
+          required: false
+          schema:
+            type: string
+          example: sqli-sig-001
+        - name: from
+          in: query
+          description: Начало периода (RFC3339)
+          required: false
+          schema:
+            type: string
+            format: date-time
+          example: "2026-01-01T00:00:00Z"
+        - name: to
+          in: query
+          description: Конец периода (RFC3339)
+          required: false
+          schema:
+            type: string
+            format: date-time
+          example: "2026-04-09T23:59:59Z"
+      responses:
+        '200':
+          description: Список событий с пагинацией
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventsListResponse'
+        '401':
+          description: Невалидный токен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/events/export:
+    post:
+      summary: Экспорт событий по фильтру
+      operationId: exportEvents
+      tags:
+        - events
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportFilter'
+            example:
+              from: "2026-01-01T00:00:00Z"
+              to: "2026-04-09T23:59:59Z"
+              ip: ""
+              verdict: block
+              rule_id: ""
+              limit: 1000
+      responses:
+        '200':
+          description: Массив событий (до 10000)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Event'
+        '400':
+          description: Невалидное тело запроса
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Невалидный токен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Внутренняя ошибка сервера
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          example: admin
+        password:
+          type: string
+          example: password123
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT-токен для авторизации
+        expires_at:
+          type: integer
+          format: int64
+          description: Unix timestamp истечения токена
+
+    Rule:
+      type: object
+      properties:
+        ID:
+          type: string
+          example: sqli-sig-001
+        Name:
+          type: string
+          example: SQLi UNION SELECT
+        Type:
+          type: string
+          enum:
+            - regex
+            - heuristic
+        Category:
+          type: string
+          enum:
+            - sqli
+            - xss
+        Pattern:
+          type: string
+          description: Regex-паттерн (для type=regex)
+        Heuristic:
+          type: string
+          description: Имя эвристической функции (для type=heuristic)
+        Threshold:
+          type: number
+          format: double
+          description: Порог для эвристики
+        Targets:
+          type: array
+          items:
+            type: string
+            enum:
+              - query
+              - body
+              - headers
+              - cookies
+              - path
+          description: Зоны анализа (пустой массив = все)
+        Weight:
+          type: number
+          format: float
+          description: Вес правила (1-10)
+          minimum: 1
+          maximum: 10
+        Enabled:
+          type: boolean
+        LogOnly:
+          type: boolean
+
+    RuleRequest:
+      type: object
+      required:
+        - rule_id
+        - name
+        - type
+        - category
+        - weight
+      properties:
+        rule_id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum:
+            - regex
+            - heuristic
+        category:
+          type: string
+          enum:
+            - sqli
+            - xss
+        pattern:
+          type: string
+        heuristic:
+          type: string
+        threshold:
+          type: number
+          format: double
+        targets:
+          type: array
+          items:
+            type: string
+        weight:
+          type: number
+          format: float
+          minimum: 0.01
+        enabled:
+          type: boolean
+        log_only:
+          type: boolean
+
+    Event:
+      type: object
+      properties:
+        EventID:
+          type: string
+          format: uuid
+        Timestamp:
+          type: integer
+          format: int64
+          description: Unix milliseconds
+        RequestID:
+          type: string
+        ClientIP:
+          type: string
+        Host:
+          type: string
+        Method:
+          type: string
+        Path:
+          type: string
+        NormalizedPath:
+          type: string
+        Verdict:
+          type: string
+          enum:
+            - allow
+            - block
+            - log_only
+        StatusCode:
+          type: integer
+        LatencyMs:
+          type: number
+          format: float
+        RawQuery:
+          type: string
+        NormalizedQuery:
+          type: string
+        RawBody:
+          type: string
+        NormalizedBody:
+          type: string
+        QueryParams:
+          type: string
+          description: JSON string
+        BodyParams:
+          type: string
+          description: JSON string
+        Headers:
+          type: string
+          description: JSON string
+        Cookies:
+          type: string
+          description: JSON string
+        UserAgent:
+          type: string
+        ContentType:
+          type: string
+        Referer:
+          type: string
+        BodyTruncated:
+          type: integer
+        BodySize:
+          type: integer
+        RuleIDs:
+          type: array
+          items:
+            type: string
+        Score:
+          type: number
+          format: float
+
+    EventsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+        total:
+          type: integer
+          format: int64
+        offset:
+          type: integer
+        limit:
+          type: integer
+
+    ExportFilter:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        ip:
+          type: string
+        verdict:
+          type: string
+        rule_id:
+          type: string
+        limit:
+          type: integer
+          maximum: 10000
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Описание ошибки
