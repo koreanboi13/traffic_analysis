@@ -46,7 +46,19 @@ export interface Rule {
   LogOnly: boolean
 }
 
-export type RuleRequest = Omit<Rule, "ID">
+export interface RuleRequest {
+  rule_id?: string
+  name: string
+  type: RuleType
+  category: RuleCategory
+  pattern?: string
+  heuristic?: string
+  threshold?: number
+  targets: string[]
+  weight: number
+  enabled: boolean
+  log_only?: boolean
+}
 
 export interface EventFilter {
   from?: string
