@@ -36,7 +36,7 @@ jobs:
       - name: Smoke check
         run: |
           docker compose ps
-          curl -f http://localhost:8080/health
+          curl -f http://localhost:8081/healthz
 
       - name: Show logs on failure
         if: failure()
