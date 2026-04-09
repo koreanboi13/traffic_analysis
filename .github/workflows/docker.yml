@@ -1,11 +1,10 @@
 name: Docker Compose Smoke Test
 
-on: push
-# on:
-#   push:
-#     branches: ["main", "develop"]
-#   pull_request:
-#     branches: ["main", "develop"]
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 jobs:
   compose-smoke-test:
