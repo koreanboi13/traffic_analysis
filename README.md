@@ -193,8 +193,16 @@ traffic_analysis/
 
 1. **Запуск инфраструктуры и WAF через docker-compose:**
 
+Для разработки
+
 ```bash
-docker-compose up --build
+docker-compose up --build -d
+```
+
+Как в прод стенде
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file ./.env.prod.example up -d
 ```
 
 Это поднимет все сервисы: teststand-db, teststand-app, clickhouse, waf-postgres, waf.
