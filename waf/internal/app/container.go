@@ -28,64 +28,68 @@ type Container struct {
 	cfg *config.Config
 
 	// Components with their sync.Once and errors
-	logger         *zap.Logger
-	loggerOnce     sync.Once
-	loggerErr      error
+	logger     *zap.Logger
+	loggerOnce sync.Once
+	loggerErr  error
 
 	clickHouse     *clickhouse.Storage
 	clickHouseOnce sync.Once
 	clickHouseErr  error
 
-	eventWriter    *eventwriter.Writer
+	eventWriter     *eventwriter.Writer
 	eventWriterOnce sync.Once
 	eventWriterErr  error
 
-	postgresDB     *postgres.DB
-	postgresOnce   sync.Once
-	postgresErr    error
+	postgresDB   *postgres.DB
+	postgresOnce sync.Once
+	postgresErr  error
 
-	ruleRepo       *postgres.RuleRepository
-	ruleRepoOnce   sync.Once
-	ruleRepoErr    error
+	ruleRepo     *postgres.RuleRepository
+	ruleRepoOnce sync.Once
+	ruleRepoErr  error
 
-	userRepo       *postgres.UserRepository
-	userRepoOnce   sync.Once
-	userRepoErr    error
+	userRepo     *postgres.UserRepository
+	userRepoOnce sync.Once
+	userRepoErr  error
 
 	ruleEngine     *detection.RuleEngine
 	ruleEngineOnce sync.Once
 	ruleEngineErr  error
 
-	allowlist      *detection.Allowlist
-	allowlistOnce  sync.Once
-	allowlistErr   error
+	allowlist     *detection.Allowlist
+	allowlistOnce sync.Once
+	allowlistErr  error
 
-	reverseProxy   *httputil.ReverseProxy
+	reverseProxy     *httputil.ReverseProxy
 	reverseProxyOnce sync.Once
 	reverseProxyErr  error
 
-	metrics        *metrics.Metrics
-	metricsOnce    sync.Once
-	metricsErr     error
+	metrics     *metrics.Metrics
+	metricsOnce sync.Once
+	metricsErr  error
 
-	ruleService    *useadmin.RuleService
+	ruleService     *useadmin.RuleService
 	ruleServiceOnce sync.Once
 	ruleServiceErr  error
 
-	authService    *useadmin.AuthService
+	authService     *useadmin.AuthService
 	authServiceOnce sync.Once
 	authServiceErr  error
 
-	eventService   *useadmin.EventService
+	eventService     *useadmin.EventService
 	eventServiceOnce sync.Once
 	eventServiceErr  error
 
+	userService     *useadmin.UserService
+	userServiceOnce sync.Once
+	userServiceErr  error
+
 	// Routers (cached after first use)
-	proxyRouter    http.Handler
+	proxyRouter     http.Handler
 	proxyRouterOnce sync.Once
 	proxyRouterErr  error
 
-	adminRouter    http.Handler
+	adminRouter     http.Handler
 	adminRouterOnce sync.Once
 	adminRouterErr  error
 }
@@ -330,6 +334,19 @@ func (c *Container) EventService() (*useadmin.EventService, error) {
 	return c.eventService, c.eventServiceErr
 }
 
+// UserService returns admin user service
+func (c *Container) UserService() (*useadmin.UserService, error) {
+	c.userServiceOnce.Do(func() {
+		userRepo, err := c.UserRepository()
+		if err != nil {
+			c.userServiceErr = fmt.Errorf("failed to get user repository: %w", err)
+			return
+		}
+		c.userService = useadmin.NewUserService(userRepo)
+	})
+	return c.userService, c.userServiceErr
+}
+
 // ProxyRouter returns configured proxy router
 func (c *Container) ProxyRouter() (http.Handler, error) {
 	c.proxyRouterOnce.Do(func() {
@@ -399,6 +416,12 @@ func (c *Container) AdminRouter() (http.Handler, error) {
 			return
 		}
 
+		userService, err := c.UserService()
+		if err != nil {
+			c.adminRouterErr = fmt.Errorf("failed to get user service: %w", err)
+			return
+		}
+
 		logger, err := c.Logger()
 		if err != nil {
 			c.adminRouterErr = fmt.Errorf("failed to get logger: %w", err)
@@ -409,6 +432,7 @@ func (c *Container) AdminRouter() (http.Handler, error) {
 			ruleService,
 			authService,
 			eventService,
+			userService,
 			[]byte(c.cfg.Auth.JWTSecret),
 			nil,
 			logger,

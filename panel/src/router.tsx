@@ -8,6 +8,7 @@ import { EventDetailPage } from "@/pages/EventDetailPage"
 import { EventsPage } from "@/pages/EventsPage"
 import { LoginPage } from "@/pages/LoginPage"
 import { RulesPage } from "@/pages/RulesPage"
+import { UsersPage } from "@/pages/UsersPage"
 
 export function RequireAuth({ children }: { children: ReactNode }) {
   const token = useAuthStore((state) => state.token)
@@ -52,6 +53,10 @@ export function createAppRouter() {
         {
           path: "rules",
           element: <RulesPage />,
+        },
+        {
+          path: "users",
+          element: <UsersPage />,
         },
       ],
     },

@@ -16,6 +16,7 @@ func NewRouter(
 	ruleService handler.RuleService,
 	authService handler.AuthService,
 	eventService handler.EventService,
+	userService handler.UserService,
 	jwtSecret []byte,
 	allowedOrigins []string,
 	logger *zap.Logger,
@@ -59,6 +60,10 @@ func NewRouter(
 			r.Post("/api/rules", handler.HandleCreateRule(ruleService, logger))
 			r.Put("/api/rules/{id}", handler.HandleUpdateRule(ruleService, logger))
 			r.Delete("/api/rules/{id}", handler.HandleDeleteRule(ruleService, logger))
+
+			r.Get("/api/users", handler.HandleListUsers(userService, logger))
+			r.Post("/api/users", handler.HandleCreateUser(userService, logger))
+			r.Delete("/api/users/{id}", handler.HandleDeleteUser(userService, logger))
 		})
 	})
 

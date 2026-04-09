@@ -41,6 +41,13 @@ services:
       interval: 2s
       retries: 10
 
+  panel:
+    build: ./panel
+    ports:
+      - "5173:5173"
+    depends_on:
+      - waf
+
   waf:
     build: ./waf
     ports:

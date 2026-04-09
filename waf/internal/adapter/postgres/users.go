@@ -64,3 +64,48 @@ func (r *UserRepository) CreateUser(ctx context.Context, username, passwordHash,
 	u.Password = passwordHash
 	return &u, nil
 }
+
+// ListUsers returns all users ordered by creation date.
+func (r *UserRepository) ListUsers(ctx context.Context) ([]domain.User, error) {
+	query, args, err := psql.
+		Select("id", "username", "role", "created_at").
+		From("users").
+		OrderBy("created_at ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("list users build query: %w", err)
+	}
+
+	rows, err := r.db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []domain.User
+	for rows.Next() {
+		var u domain.User
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt); err != nil {
+			return nil, fmt.Errorf("list users scan: %w", err)
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+// DeleteUser deletes a user by ID. Returns true if a row was deleted.
+func (r *UserRepository) DeleteUser(ctx context.Context, id int) (bool, error) {
+	query, args, err := psql.
+		Delete("users").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("delete user build query: %w", err)
+	}
+
+	tag, err := r.db.Pool.Exec(ctx, query, args...)
+	if err != nil {
+		return false, fmt.Errorf("delete user: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}

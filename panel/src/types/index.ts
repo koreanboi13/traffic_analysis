@@ -85,6 +85,19 @@ export interface ExportFilter {
   rule_id?: string
 }
 
+export interface User {
+  id: number
+  username: string
+  role: UserRole
+  created_at: string
+}
+
+export interface CreateUserRequest {
+  username: string
+  password: string
+  role: UserRole
+}
+
 export interface LoginRequest {
   username: string
   password: string

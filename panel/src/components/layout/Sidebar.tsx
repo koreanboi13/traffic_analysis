@@ -1,21 +1,27 @@
 import { Link, useLocation, useNavigate } from "react-router-dom"
-import { LayoutDashboard, List, LogOut, Shield } from "lucide-react"
+import { LayoutDashboard, List, LogOut, Shield, Users } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useAuthStore } from "@/store/authStore"
 
-const navItems = [
+const publicNavItems = [
   { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
   { label: "Events", to: "/events", icon: List },
   { label: "Rules", to: "/rules", icon: Shield },
+]
+
+const adminNavItems = [
+  { label: "Users", to: "/users", icon: Users },
 ]
 
 export function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
   const username = useAuthStore((state) => state.username)
+  const role = useAuthStore((state) => state.role)
   const clearAuth = useAuthStore((state) => state.clearAuth)
+  const isAdmin = role === "admin"
 
   const isActive = (to: string) => {
     if (to === "/events") {
@@ -29,6 +35,8 @@ export function Sidebar() {
     clearAuth()
     navigate("/login", { replace: true })
   }
+
+  const navItems = isAdmin ? [...publicNavItems, ...adminNavItems] : publicNavItems
 
   return (
     <aside className="fixed left-0 top-0 flex h-screen w-[240px] flex-col border-r border-zinc-800 bg-zinc-950 px-4 py-6">
