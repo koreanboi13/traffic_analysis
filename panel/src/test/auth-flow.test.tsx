@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RouterProvider } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -21,7 +22,18 @@ function makeJwt(payload: Record<string, unknown>): string {
 
 function renderAt(pathname: string) {
   window.history.pushState({}, "", pathname)
-  return render(<RouterProvider router={createAppRouter()} />)
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  })
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={createAppRouter()} />
+    </QueryClientProvider>,
+  )
 }
 
 describe("auth flow", () => {
