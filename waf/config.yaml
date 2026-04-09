@@ -15,3 +15,32 @@ clickhouse:
 logging:
   level: "info"
   format: "json"
+
+detection:
+  rules_file: "rules.yaml"
+  log_threshold: 3
+  block_threshold: 7
+  enabled: true
+  allowlist:
+    - comment: "Health check endpoints"
+      paths: ["/healthz"]
+    - comment: "Local development"
+      ips: ["127.0.0.1", "::1"]
+
+auth:
+  jwt_secret: "dev-secret-change-me"
+  token_ttl: 24h
+
+admin_api:
+  listen_addr: ":8090"
+
+metrics:
+  listen_addr: ":9090"
+
+postgres:
+  host: "localhost"
+  port: 5432
+  user: "waf"
+  password: "waf_secret"
+  db: "waf"
+  ssl_mode: "disable"

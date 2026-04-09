@@ -5,103 +5,112 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
 
-	"github.com/go-chi/chi/v5"
-	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/koreanboi13/traffic_analysis/waf/config"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/engine"
-	"github.com/koreanboi13/traffic_analysis/waf/internal/events"
-	eventsch "github.com/koreanboi13/traffic_analysis/waf/internal/events/clickhouse"
-	wafmw "github.com/koreanboi13/traffic_analysis/waf/internal/middleware"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/app"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/app/metrics"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 func main() {
-	// 1. Determine config path.
+	// 1. Load configuration
 	configPath := os.Getenv("WAF_CONFIG_PATH")
 	if configPath == "" {
 		configPath = "config.yaml"
 	}
 
-	// 2. Load configuration.
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	// 3. Setup logger.
-	logger, err := setupLogger(cfg.Logging)
+	// 2. Create DI container
+	container := app.NewContainer(cfg)
+
+	// 3. Get logger for startup messages
+	logger, err := container.Logger()
 	if err != nil {
-		log.Fatalf("failed to setup logger: %v", err)
+		log.Fatalf("failed to get logger: %v", err)
 	}
-	defer logger.Sync()
+	defer container.Close()
 
-	// 4. Connect to ClickHouse.
-	storage, err := eventsch.NewStorage(cfg.ClickHouse.Addr, cfg.ClickHouse.Database, logger)
+	// 4. Seed defaults (admin user, rules)
+	seedCtx := context.Background()
+	if err := container.SeedDefaults(seedCtx); err != nil {
+		logger.Error("seed failed", zap.Error(err))
+		// Continue even if seed fails - maybe rules already exist
+	}
+
+	// 5. Get routers
+	proxyRouter, err := container.ProxyRouter()
 	if err != nil {
-		logger.Fatal("failed to connect to clickhouse", zap.Error(err))
+		logger.Fatal("failed to create proxy router", zap.Error(err))
 	}
-	defer storage.Close()
 
-	writer := events.NewWriter(storage, cfg.ClickHouse.BatchSize, cfg.ClickHouse.FlushInterval, logger)
-	writerCtx, cancelWriter := context.WithCancel(context.Background())
-	defer cancelWriter()
-	writer.Start(writerCtx)
-	defer writer.Stop()
-
-	// 5. Create reverse proxy.
-	proxy, err := engine.NewProxy(cfg.Proxy.BackendURL, logger)
+	adminRouter, err := container.AdminRouter()
 	if err != nil {
-		logger.Fatal("failed to create proxy", zap.Error(err))
+		logger.Fatal("failed to create admin router", zap.Error(err))
 	}
 
-	// 6. Setup chi router.
-	r := chi.NewRouter()
-	r.Use(chimw.RequestID)
-
-	// healthz before WAF middleware — no analysis on healthchecks.
-	r.Get("/healthz", engine.HealthHandler())
-
-	// WAF middleware group — Parse, Normalize, RecordEvent will be added here.
-	r.Group(func(r chi.Router) {
-		r.Use(wafmw.Parse(cfg.Analysis.MaxBodySize))
-		r.Use(wafmw.Normalize(cfg.Analysis.MaxDecodePasses, logger))
-
-		recordEvent := wafmw.NewRecordEvent(writer, logger)
-		r.Use(recordEvent.Handler)
-
-		r.Handle("/*", proxy)
-	})
-
-	// 7. Start HTTP server.
-	logger.Info("waf proxy ready",
-		zap.String("listen", cfg.Proxy.ListenAddr),
-		zap.String("backend", cfg.Proxy.BackendURL),
-	)
-
-	if err := http.ListenAndServe(cfg.Proxy.ListenAddr, r); err != nil {
-		logger.Fatal("http server failed", zap.Error(err))
-	}
-}
-
-// setupLogger creates a zap.Logger based on logging config.
-func setupLogger(cfg config.LoggingConfig) (*zap.Logger, error) {
-	var zapCfg zap.Config
-
-	switch cfg.Format {
-	case "console":
-		zapCfg = zap.NewDevelopmentConfig()
-	default:
-		zapCfg = zap.NewProductionConfig()
-	}
-
-	// Parse log level.
-	level, err := zapcore.ParseLevel(cfg.Level)
+	// 6. Get metrics server
+	m, err := container.Metrics()
 	if err != nil {
-		return nil, err
+		logger.Fatal("failed to get metrics", zap.Error(err))
 	}
-	zapCfg.Level.SetLevel(level)
+	metricsSrv := metrics.NewServer(cfg.Metrics.ListenAddr, m)
 
-	return zapCfg.Build()
+	// 7. Start servers with graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	proxyServer := &http.Server{Addr: cfg.Proxy.ListenAddr, Handler: proxyRouter}
+	adminServer := &http.Server{Addr: cfg.AdminAPI.ListenAddr, Handler: adminRouter}
+
+	go func() {
+		logger.Info("proxy listening", zap.String("addr", cfg.Proxy.ListenAddr))
+		if err := proxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("proxy server failed", zap.Error(err))
+			stop()
+		}
+	}()
+
+	go func() {
+		logger.Info("admin api listening", zap.String("addr", cfg.AdminAPI.ListenAddr))
+		if err := adminServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("admin server failed", zap.Error(err))
+			stop()
+		}
+	}()
+
+	go func() {
+		logger.Info("metrics listening", zap.String("addr", cfg.Metrics.ListenAddr))
+		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("metrics server failed", zap.Error(err))
+			stop()
+		}
+	}()
+
+	<-ctx.Done()
+	logger.Info("shutting down servers")
+
+	shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	for _, srv := range []*http.Server{proxyServer, adminServer, metricsSrv} {
+		wg.Add(1)
+		go func(s *http.Server) {
+			defer wg.Done()
+			if err := s.Shutdown(shutCtx); err != nil {
+				logger.Error("server shutdown error", zap.String("addr", s.Addr), zap.Error(err))
+			}
+		}(srv)
+	}
+	wg.Wait()
+
+	logger.Info("all servers stopped")
 }

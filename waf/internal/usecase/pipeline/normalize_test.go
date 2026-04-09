@@ -1,15 +1,12 @@
-package middleware
+package pipeline
 
 import (
 	"testing"
-
-	"go.uber.org/zap"
 )
 
 func TestNormalizeString(t *testing.T) {
 	t.Parallel()
 
-	logger := zap.NewNop()
 	tests := []struct {
 		name      string
 		input     string
@@ -95,9 +92,9 @@ func TestNormalizeString(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := normalizeString(tc.input, tc.maxPasses, logger)
+			got := NormalizeString(tc.input, tc.maxPasses)
 			if got != tc.expected {
-				t.Fatalf("normalizeString(%q, %d) = %q, want %q", tc.input, tc.maxPasses, got, tc.expected)
+				t.Fatalf("NormalizeString(%q, %d) = %q, want %q", tc.input, tc.maxPasses, got, tc.expected)
 			}
 		})
 	}
@@ -106,7 +103,6 @@ func TestNormalizeString(t *testing.T) {
 func TestNormalizePath(t *testing.T) {
 	t.Parallel()
 
-	logger := zap.NewNop()
 	tests := []struct {
 		name      string
 		input     string
@@ -144,9 +140,9 @@ func TestNormalizePath(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := normalizePath(tc.input, tc.maxPasses, logger)
+			got := NormalizePath(tc.input, tc.maxPasses)
 			if got != tc.expected {
-				t.Fatalf("normalizePath(%q, %d) = %q, want %q", tc.input, tc.maxPasses, got, tc.expected)
+				t.Fatalf("NormalizePath(%q, %d) = %q, want %q", tc.input, tc.maxPasses, got, tc.expected)
 			}
 		})
 	}
@@ -155,7 +151,6 @@ func TestNormalizePath(t *testing.T) {
 func TestDecodeURLMultiPass(t *testing.T) {
 	t.Parallel()
 
-	logger := zap.NewNop()
 	tests := []struct {
 		name      string
 		input     string
@@ -193,9 +188,9 @@ func TestDecodeURLMultiPass(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := decodeURLMultiPass(tc.input, tc.maxPasses, logger)
+			got := DecodeURLMultiPass(tc.input, tc.maxPasses)
 			if got != tc.expected {
-				t.Fatalf("decodeURLMultiPass(%q, %d) = %q, want %q", tc.input, tc.maxPasses, got, tc.expected)
+				t.Fatalf("DecodeURLMultiPass(%q, %d) = %q, want %q", tc.input, tc.maxPasses, got, tc.expected)
 			}
 		})
 	}

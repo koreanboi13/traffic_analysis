@@ -3,7 +3,7 @@
 # Usage: ./attacks.sh [BASE_URL]
 # Default base URL: http://localhost:8888
 
-BASE_URL="${1:-http://localhost:8888}"
+BASE_URL="${1:-http://localhost:8081}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

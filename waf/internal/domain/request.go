@@ -1,7 +1,6 @@
-package middleware
+package domain
 
 // ParsedRequest holds all extracted and normalized data from an HTTP request.
-// Raw fields are populated by Parse middleware, Normalized fields by Normalize middleware.
 type ParsedRequest struct {
 	// Identity
 	RequestID string
@@ -31,6 +30,11 @@ type ParsedRequest struct {
 	NormalizedParams     map[string]string
 	NormalizedBody       string
 	NormalizedBodyParams []BodyParam
+
+	// Detection results (populated by Detect)
+	Verdict string // "allow", "log_only", "block"
+	RuleIDs []string
+	Score   float32
 }
 
 // BodyParam represents a single extracted body field.

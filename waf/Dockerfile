@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,8 @@ WORKDIR /app
 
 COPY --from=builder /app/waf .
 COPY --from=builder /app/config.yaml .
+COPY --from=builder /app/rules.yaml .
 
-EXPOSE 8080
+EXPOSE 8080 8090 9090
 
 CMD ["./waf"]

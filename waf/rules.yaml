@@ -1,0 +1,139 @@
+rules:
+  # SQLi signatures (weight 5-9)
+  - id: "sqli-sig-001"
+    name: "SQLi UNION SELECT"
+    type: "regex"
+    category: "sqli"
+    pattern: "(?i)(?:union)\\s+(?:all\\s+)?(?:select)"
+    targets: ["query", "body"]
+    weight: 9
+    enabled: true
+
+  - id: "sqli-sig-002"
+    name: "SQLi comment at end"
+    type: "regex"
+    category: "sqli"
+    pattern: "(?i)(?:--|#|/\\*)\\s*$"
+    targets: ["query", "body"]
+    weight: 6
+    enabled: true
+
+  - id: "sqli-sig-003"
+    name: "SQLi time-based"
+    type: "regex"
+    category: "sqli"
+    pattern: "(?i)(?:sleep|benchmark|waitfor\\s+delay)\\s*\\("
+    targets: ["query", "body"]
+    weight: 8
+    enabled: true
+
+  - id: "sqli-sig-004"
+    name: "SQLi boolean-based"
+    type: "regex"
+    category: "sqli"
+    pattern: "(?i)(?:or|and)\\s+[\\d\"'`]+\\s*[=<>!]"
+    targets: ["query", "body"]
+    weight: 7
+    enabled: true
+
+  - id: "sqli-sig-005"
+    name: "SQLi DML/DDL"
+    type: "regex"
+    category: "sqli"
+    pattern: "(?i)(?:insert|update|delete|drop|alter|create|truncate)\\s+(?:into|table|database|from)"
+    targets: ["query", "body"]
+    weight: 7
+    enabled: true
+
+  - id: "sqli-sig-006"
+    name: "SQLi stacked queries"
+    type: "regex"
+    category: "sqli"
+    pattern: ";\\s*(?i)(?:select|insert|update|delete|drop|alter|create)"
+    targets: ["query", "body"]
+    weight: 8
+    enabled: true
+
+  # XSS signatures (weight 6-9)
+  - id: "xss-sig-001"
+    name: "XSS script tag"
+    type: "regex"
+    category: "xss"
+    pattern: "(?i)<script[\\s>]"
+    targets: []
+    weight: 9
+    enabled: true
+
+  - id: "xss-sig-002"
+    name: "XSS event handler"
+    type: "regex"
+    category: "xss"
+    pattern: "(?i)on(?:error|load|click|mouseover|focus|blur|submit|reset|change|keyup|keydown)\\s*="
+    targets: []
+    weight: 8
+    enabled: true
+
+  - id: "xss-sig-003"
+    name: "XSS javascript URI"
+    type: "regex"
+    category: "xss"
+    pattern: "(?i)javascript\\s*:"
+    targets: []
+    weight: 8
+    enabled: true
+
+  - id: "xss-sig-004"
+    name: "XSS data URI"
+    type: "regex"
+    category: "xss"
+    pattern: "(?i)data\\s*:\\s*text/html"
+    targets: []
+    weight: 7
+    enabled: true
+
+  - id: "xss-sig-005"
+    name: "XSS dangerous tags"
+    type: "regex"
+    category: "xss"
+    pattern: "(?i)<(?:iframe|embed|object|applet|form|base|link|meta|style)\\b"
+    targets: []
+    weight: 6
+    enabled: true
+
+  - id: "xss-sig-006"
+    name: "XSS dangerous functions"
+    type: "regex"
+    category: "xss"
+    pattern: "(?i)(?:eval|settimeout|setinterval|document\\.write|innerhtml)\\s*\\("
+    targets: []
+    weight: 7
+    enabled: true
+
+  # Heuristic rules (weight 1-3)
+  - id: "sqli-heur-001"
+    name: "SQLi special char ratio"
+    type: "heuristic"
+    category: "sqli"
+    heuristic: "special_char_ratio"
+    threshold: 0.3
+    targets: ["query", "body"]
+    weight: 3
+    enabled: true
+
+  - id: "sqli-heur-002"
+    name: "SQLi suspicious sequences"
+    type: "heuristic"
+    category: "sqli"
+    heuristic: "sqli_sequences"
+    targets: ["query", "body"]
+    weight: 3
+    enabled: true
+
+  - id: "xss-heur-001"
+    name: "XSS HTML tags in params"
+    type: "heuristic"
+    category: "xss"
+    heuristic: "html_tags"
+    targets: ["query", "body"]
+    weight: 2
+    enabled: true

@@ -1,16 +1,23 @@
-package events
+package clickhouse
 
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/google/uuid"
+	"github.com/koreanboi13/traffic_analysis/waf/internal/domain"
 	"go.uber.org/zap"
 )
 
+// validDBName matches safe ClickHouse database identifiers to prevent SQL injection.
+var validDBName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
 // Storage manages ClickHouse connection and event persistence.
+// It satisfies admin.EventStorage and eventwriter.BatchInserter interfaces.
 type Storage struct {
 	conn     clickhouse.Conn
 	logger   *zap.Logger
@@ -19,6 +26,10 @@ type Storage struct {
 
 // NewStorage connects to ClickHouse via the native protocol and runs auto-migration.
 func NewStorage(addr, database string, logger *zap.Logger) (*Storage, error) {
+	if !validDBName.MatchString(database) {
+		return nil, fmt.Errorf("invalid database name: %q", database)
+	}
+
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{addr},
 		Auth: clickhouse.Auth{
@@ -121,20 +132,13 @@ func (s *Storage) migrateNewColumns(ctx context.Context, database string) error 
 	for _, col := range columns {
 		alterQuery := fmt.Sprintf("ALTER TABLE %s.waf_events ADD COLUMN IF NOT EXISTS %s %s",
 			database, col.name, col.typ)
-		
+
 		if col.modifier != "" {
 			alterQuery += " " + col.modifier
 		}
-		
+
 		if err := s.conn.Exec(ctx, alterQuery); err != nil {
-			// Логируем ошибку, но продолжаем миграцию
-			// Некоторые колонки могли уже существовать
-			s.logger.Warn("failed to add column",
-				zap.String("column", col.name),
-				zap.Error(err),
-			)
-			// Не возвращаем ошибку, чтобы не блокировать запуск
-			// Колонка может уже существовать
+			return fmt.Errorf("alter table add column %s: %w", col.name, err)
 		}
 	}
 
@@ -142,16 +146,13 @@ func (s *Storage) migrateNewColumns(ctx context.Context, database string) error 
 	return nil
 }
 
-// InsertBatch inserts a batch of events into ClickHouse.
-// The order of fields must match exactly the table schema:
-// - First 10 fields: base fields (CREATE TABLE order)
-// - Next 15 fields: new fields (ALTER TABLE order)
-func (s *Storage) InsertBatch(ctx context.Context, events []Event) error {
+// InsertBatch inserts a batch of domain.Event into ClickHouse.
+// Satisfies eventwriter.BatchInserter.
+func (s *Storage) InsertBatch(ctx context.Context, events []domain.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
 
-	// Prepare batch for insertion
 	batch, err := s.conn.PrepareBatch(ctx, fmt.Sprintf(`
 		INSERT INTO %s.waf_events (
 			event_id, timestamp, request_id, client_ip, host, method, path,
@@ -171,14 +172,7 @@ func (s *Storage) InsertBatch(ctx context.Context, events []Event) error {
 		return fmt.Errorf("prepare batch: %w", err)
 	}
 
-	// Append each event to the batch
 	for _, event := range events {
-		// Convert verdict string to the appropriate type
-		// ClickHouse driver handles Enum8 conversion automatically from string
-		
-		// Convert bool to uint8 (0 or 1) for body_truncated
-		bodyTruncated := event.BodyTruncated
-		
 		err := batch.Append(
 			// Base fields (10 fields)
 			event.EventID,
@@ -189,10 +183,10 @@ func (s *Storage) InsertBatch(ctx context.Context, events []Event) error {
 			event.Method,
 			event.Path,
 			event.NormalizedPath,
-			event.Verdict, // String -> Enum8('allow','block','log_only')
+			event.Verdict,
 			event.StatusCode,
 			event.LatencyMs,
-			// New fields (15 fields)
+			// Extended fields (16 fields)
 			event.RawQuery,
 			event.NormalizedQuery,
 			event.RawBody,
@@ -204,23 +198,161 @@ func (s *Storage) InsertBatch(ctx context.Context, events []Event) error {
 			event.ContentType,
 			event.Referer,
 			event.Cookies,
-			bodyTruncated,
+			event.BodyTruncated,
 			event.BodySize,
-			event.TriggeredRulesIDs,
-			event.RiskScore,
+			event.RuleIDs,
+			event.Score,
 		)
 		if err != nil {
 			return fmt.Errorf("append event to batch: %w (event_id: %s)", err, event.EventID)
 		}
 	}
 
-	// Send the batch to ClickHouse
 	if err := batch.Send(); err != nil {
 		return fmt.Errorf("send batch: %w", err)
 	}
 
 	s.logger.Debug("batch inserted successfully", zap.Int("batch_size", len(events)))
 	return nil
+}
+
+// QueryEvents returns events matching the filter with pagination and a total count.
+// Satisfies admin.EventStorage.
+func (s *Storage) QueryEvents(ctx context.Context, f domain.EventFilter) ([]domain.Event, int64, error) {
+	// Clamp limit
+	if f.Limit <= 0 {
+		f.Limit = 100
+	}
+	if f.Limit > 100 {
+		f.Limit = 100
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+
+	where, args := s.buildWhere(f)
+
+	// Count query
+	countQuery := fmt.Sprintf("SELECT count() FROM %s.waf_events %s", s.database, where)
+	var total uint64
+	if err := s.conn.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count events: %w", err)
+	}
+
+	// Data query
+	dataQuery := fmt.Sprintf(`SELECT event_id, timestamp, request_id, client_ip, host, method, path,
+		normalized_path, verdict, status_code, latency_ms,
+		raw_query, normalized_query, raw_body, normalized_body,
+		query_params, body_params, headers, user_agent, content_type,
+		referer, cookies, body_truncated, body_size, rule_ids, score
+	FROM %s.waf_events %s ORDER BY timestamp DESC LIMIT %d OFFSET %d`,
+		s.database, where, f.Limit, f.Offset)
+
+	rows, err := s.conn.Query(ctx, dataQuery, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query events: %w", err)
+	}
+	defer rows.Close()
+
+	events, err := s.scanEvents(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return events, int64(total), nil
+}
+
+// ExportEvents returns events matching the filter with a hard cap of 10000 rows.
+// Satisfies admin.EventStorage.
+func (s *Storage) ExportEvents(ctx context.Context, f domain.EventFilter) ([]domain.Event, error) {
+	if f.Limit <= 0 || f.Limit > 10000 {
+		f.Limit = 10000
+	}
+
+	where, args := s.buildWhere(f)
+
+	query := fmt.Sprintf(`SELECT event_id, timestamp, request_id, client_ip, host, method, path,
+		normalized_path, verdict, status_code, latency_ms,
+		raw_query, normalized_query, raw_body, normalized_body,
+		query_params, body_params, headers, user_agent, content_type,
+		referer, cookies, body_truncated, body_size, rule_ids, score
+	FROM %s.waf_events %s ORDER BY timestamp DESC LIMIT %d`,
+		s.database, where, f.Limit)
+
+	rows, err := s.conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("export events: %w", err)
+	}
+	defer rows.Close()
+
+	return s.scanEvents(rows)
+}
+
+// buildWhere constructs a WHERE clause and args from a domain.EventFilter.
+// domain.EventFilter.From/To are *int64 (Unix ms); converted to time.Time for ClickHouse.
+func (s *Storage) buildWhere(f domain.EventFilter) (string, []interface{}) {
+	var conditions []string
+	var args []interface{}
+
+	if f.IP != "" {
+		conditions = append(conditions, "client_ip = ?")
+		args = append(args, f.IP)
+	}
+	if f.Verdict != "" {
+		conditions = append(conditions, "verdict = ?")
+		args = append(args, f.Verdict)
+	}
+	if f.RuleID != "" {
+		conditions = append(conditions, "has(rule_ids, ?)")
+		args = append(args, f.RuleID)
+	}
+	if f.From != nil {
+		conditions = append(conditions, "timestamp >= ?")
+		args = append(args, time.UnixMilli(*f.From))
+	}
+	if f.To != nil {
+		conditions = append(conditions, "timestamp <= ?")
+		args = append(args, time.UnixMilli(*f.To))
+	}
+
+	if len(conditions) == 0 {
+		return "", nil
+	}
+
+	where := "WHERE "
+	for i, c := range conditions {
+		if i > 0 {
+			where += " AND "
+		}
+		where += c
+	}
+	return where, args
+}
+
+// scanEvents reads rows into domain.Event structs.
+func (s *Storage) scanEvents(rows driver.Rows) ([]domain.Event, error) {
+	var result []domain.Event
+	for rows.Next() {
+		var e domain.Event
+		var ts time.Time
+		var eventID uuid.UUID
+		if err := rows.Scan(
+			&eventID, &ts, &e.RequestID, &e.ClientIP, &e.Host, &e.Method, &e.Path,
+			&e.NormalizedPath, &e.Verdict, &e.StatusCode, &e.LatencyMs,
+			&e.RawQuery, &e.NormalizedQuery, &e.RawBody, &e.NormalizedBody,
+			&e.QueryParams, &e.BodyParams, &e.Headers, &e.UserAgent, &e.ContentType,
+			&e.Referer, &e.Cookies, &e.BodyTruncated, &e.BodySize, &e.RuleIDs, &e.Score,
+		); err != nil {
+			return nil, fmt.Errorf("scan event: %w", err)
+		}
+		e.EventID = eventID
+		e.Timestamp = ts.UnixMilli()
+		result = append(result, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+	return result, nil
 }
 
 // Close closes the ClickHouse connection.
@@ -231,14 +363,4 @@ func (s *Storage) Close() error {
 // Ping checks the ClickHouse connection health.
 func (s *Storage) Ping(ctx context.Context) error {
 	return s.conn.Ping(ctx)
-}
-
-// Exec executes an arbitrary SQL query (for testing/admin purposes)
-func (s *Storage) Exec(ctx context.Context, query string) error {
-	return s.conn.Exec(ctx, query)
-}
-
-// Query executes a SELECT query and returns rows (for testing/admin purposes)
-func (s *Storage) Query(ctx context.Context, query string) (driver.Rows, error) {
-	return s.conn.Query(ctx, query)
 }
